@@ -1,0 +1,66 @@
+[0.000000] (-) TimerEvent: {}
+[0.001091] (f1tenth_research) JobQueued: {'identifier': 'f1tenth_research', 'dependencies': OrderedDict()}
+[0.001148] (f1tenth_research) JobStarted: {'identifier': 'f1tenth_research'}
+[0.099901] (-) TimerEvent: {}
+[0.201043] (-) TimerEvent: {}
+[0.301745] (-) TimerEvent: {}
+[0.403744] (-) TimerEvent: {}
+[0.505646] (-) TimerEvent: {}
+[0.606190] (-) TimerEvent: {}
+[0.708750] (-) TimerEvent: {}
+[0.809211] (-) TimerEvent: {}
+[0.919082] (-) TimerEvent: {}
+[1.022794] (-) TimerEvent: {}
+[1.123717] (-) TimerEvent: {}
+[1.226408] (-) TimerEvent: {}
+[1.329248] (-) TimerEvent: {}
+[1.429840] (-) TimerEvent: {}
+[1.531347] (-) TimerEvent: {}
+[1.632974] (-) TimerEvent: {}
+[1.728319] (f1tenth_research) Command: {'cmd': ['/usr/bin/python3', 'setup.py', 'egg_info', '--egg-base', '../../build/f1tenth_research', 'build', '--build-base', '/research_ws/build/f1tenth_research/build', 'install', '--record', '/research_ws/build/f1tenth_research/install.log', '--install-scripts', '$base/lib/f1tenth_research', '--single-version-externally-managed'], 'cwd': '/research_ws/src/f1tenth_research', 'env': {'HOSTNAME': '18da093e2082', 'GIT_ASKPASS': '/root/.vscode-server/bin/6a44c352bd24569c417e530095901b649960f9f8/extensions/git/dist/askpass.sh', 'SHLVL': '2', 'LD_LIBRARY_PATH': '/opt/ros/foxy/opt/yaml_cpp_vendor/lib:/opt/ros/foxy/opt/rviz_ogre_vendor/lib:/opt/ros/foxy/lib/x86_64-linux-gnu:/opt/ros/foxy/lib', 'BROWSER': '/root/.vscode-server/bin/6a44c352bd24569c417e530095901b649960f9f8/bin/helpers/browser.sh', 'HOME': '/root', 'OLDPWD': '/research_ws/src/f1tenth_research/f1tenth_research', 'TERM_PROGRAM_VERSION': '1.123.0', 'VSCODE_IPC_HOOK_CLI': '/tmp/vscode-ipc-19813236-82f0-4893-ab7d-30d9cb5dfc64.sock', 'ROS_PYTHON_VERSION': '3', 'VSCODE_GIT_ASKPASS_MAIN': '/root/.vscode-server/bin/6a44c352bd24569c417e530095901b649960f9f8/extensions/git/dist/askpass-main.js', 'VSCODE_GIT_ASKPASS_NODE': '/root/.vscode-server/bin/6a44c352bd24569c417e530095901b649960f9f8/node', 'VSCODE_PYTHON_AUTOACTIVATE_GUARD': '1', 'COLORTERM': 'truecolor', 'REMOTE_CONTAINERS': 'true', 'COLCON_PREFIX_PATH': '/sim_ws/install', 'ROS_DISTRO': 'foxy', 'REMOTE_CONTAINERS_IPC': '/tmp/vscode-remote-containers-ipc-f06b643a-250c-4750-ac69-e9ae5698a383.sock', '_': '/usr/bin/colcon', 'ROS_VERSION': '2', 'TERM': 'xterm-256color', 'ROS_LOCALHOST_ONLY': '0', 'PATH': '/opt/ros/foxy/bin:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/debugCommand:/root/.vscode-server/data/User/globalStorage/github.copilot-chat/copilotCli:/root/.vscode-server/bin/6a44c352bd24569c417e530095901b649960f9f8/bin/remote-cli:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'REMOTE_CONTAINERS_SOCKETS': '["/tmp/vscode-ssh-auth-f06b643a-250c-4750-ac69-e9ae5698a383.sock","/root/.gnupg/S.gpg-agent"]', 'DISPLAY': 'novnc:0.0', 'LANG': 'C.UTF-8', 'LS_COLORS': 'rs=0:di=01;34:ln=01;36:mh=00:pi=40;33:so=01;35:do=01;35:bd=40;33;01:cd=40;33;01:or=40;31;01:mi=00:su=37;41:sg=30;43:ca=30;41:tw=30;42:ow=34;42:st=37;44:ex=01;32:*.tar=01;31:*.tgz=01;31:*.arc=01;31:*.arj=01;31:*.taz=01;31:*.lha=01;31:*.lz4=01;31:*.lzh=01;31:*.lzma=01;31:*.tlz=01;31:*.txz=01;31:*.tzo=01;31:*.t7z=01;31:*.zip=01;31:*.z=01;31:*.dz=01;31:*.gz=01;31:*.lrz=01;31:*.lz=01;31:*.lzo=01;31:*.xz=01;31:*.zst=01;31:*.tzst=01;31:*.bz2=01;31:*.bz=01;31:*.tbz=01;31:*.tbz2=01;31:*.tz=01;31:*.deb=01;31:*.rpm=01;31:*.jar=01;31:*.war=01;31:*.ear=01;31:*.sar=01;31:*.rar=01;31:*.alz=01;31:*.ace=01;31:*.zoo=01;31:*.cpio=01;31:*.7z=01;31:*.rz=01;31:*.cab=01;31:*.wim=01;31:*.swm=01;31:*.dwm=01;31:*.esd=01;31:*.jpg=01;35:*.jpeg=01;35:*.mjpg=01;35:*.mjpeg=01;35:*.gif=01;35:*.bmp=01;35:*.pbm=01;35:*.pgm=01;35:*.ppm=01;35:*.tga=01;35:*.xbm=01;35:*.xpm=01;35:*.tif=01;35:*.tiff=01;35:*.png=01;35:*.svg=01;35:*.svgz=01;35:*.mng=01;35:*.pcx=01;35:*.mov=01;35:*.mpg=01;35:*.mpeg=01;35:*.m2v=01;35:*.mkv=01;35:*.webm=01;35:*.ogm=01;35:*.mp4=01;35:*.m4v=01;35:*.mp4v=01;35:*.vob=01;35:*.qt=01;35:*.nuv=01;35:*.wmv=01;35:*.asf=01;35:*.rm=01;35:*.rmvb=01;35:*.flc=01;35:*.avi=01;35:*.fli=01;35:*.flv=01;35:*.gl=01;35:*.dl=01;35:*.xcf=01;35:*.xwd=01;35:*.yuv=01;35:*.cgm=01;35:*.emf=01;35:*.ogv=01;35:*.ogx=01;35:*.aac=00;36:*.au=00;36:*.flac=00;36:*.m4a=00;36:*.mid=00;36:*.midi=00;36:*.mka=00;36:*.mp3=00;36:*.mpc=00;36:*.ogg=00;36:*.ra=00;36:*.wav=00;36:*.oga=00;36:*.opus=00;36:*.spx=00;36:*.xspf=00;36:', 'VSCODE_GIT_IPC_HANDLE': '/tmp/vscode-git-f992b61b7a.sock', 'TERM_PROGRAM': 'vscode', 'SSH_AUTH_SOCK': '/tmp/vscode-ssh-auth-f06b643a-250c-4750-ac69-e9ae5698a383.sock', 'AMENT_PREFIX_PATH': '/sim_ws/install/f1tenth_gym_ros:/opt/ros/foxy', 'SHELL': '/bin/bash', 'VSCODE_GIT_ASKPASS_EXTRA_ARGS': '', 'PWD': '/research_ws/build/f1tenth_research', 'LC_ALL': 'C.UTF-8', 'COPILOT_DEBUG_NONCE': '0e5632e4907df2f2e0b7bddc262bc86c', 'PYTHONPATH': '/research_ws/build/f1tenth_research/prefix_override:/research_ws/install/f1tenth_research/lib/python3.8/site-packages:/sim_ws/install/f1tenth_gym_ros/lib/python3.8/site-packages:/opt/ros/foxy/lib/python3.8/site-packages', 'COLCON': '1'}, 'shell': False}
+[1.734159] (-) TimerEvent: {}
+[1.840116] (-) TimerEvent: {}
+[1.940874] (-) TimerEvent: {}
+[2.046949] (-) TimerEvent: {}
+[2.147761] (-) TimerEvent: {}
+[2.173531] (f1tenth_research) StdoutLine: {'line': b'running egg_info\n'}
+[2.175789] (f1tenth_research) StdoutLine: {'line': b'creating ../../build/f1tenth_research/f1tenth_research.egg-info\n'}
+[2.176813] (f1tenth_research) StdoutLine: {'line': b'writing ../../build/f1tenth_research/f1tenth_research.egg-info/PKG-INFO\n'}
+[2.176989] (f1tenth_research) StdoutLine: {'line': b'writing dependency_links to ../../build/f1tenth_research/f1tenth_research.egg-info/dependency_links.txt\n'}
+[2.177204] (f1tenth_research) StdoutLine: {'line': b'writing entry points to ../../build/f1tenth_research/f1tenth_research.egg-info/entry_points.txt\n'}
+[2.177375] (f1tenth_research) StdoutLine: {'line': b'writing requirements to ../../build/f1tenth_research/f1tenth_research.egg-info/requires.txt\n'}
+[2.177538] (f1tenth_research) StdoutLine: {'line': b'writing top-level names to ../../build/f1tenth_research/f1tenth_research.egg-info/top_level.txt\n'}
+[2.188108] (f1tenth_research) StdoutLine: {'line': b"writing manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'\n"}
+[2.249733] (-) TimerEvent: {}
+[2.266199] (f1tenth_research) StdoutLine: {'line': b"reading manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'\n"}
+[2.268024] (f1tenth_research) StdoutLine: {'line': b"writing manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'\n"}
+[2.268328] (f1tenth_research) StdoutLine: {'line': b'running build\n'}
+[2.268687] (f1tenth_research) StdoutLine: {'line': b'running build_py\n'}
+[2.269070] (f1tenth_research) StdoutLine: {'line': b'creating /research_ws/build/f1tenth_research/build\n'}
+[2.270037] (f1tenth_research) StdoutLine: {'line': b'creating /research_ws/build/f1tenth_research/build/lib\n'}
+[2.270173] (f1tenth_research) StdoutLine: {'line': b'creating /research_ws/build/f1tenth_research/build/lib/f1tenth_research\n'}
+[2.270229] (f1tenth_research) StdoutLine: {'line': b'copying f1tenth_research/__init__.py -> /research_ws/build/f1tenth_research/build/lib/f1tenth_research\n'}
+[2.270918] (f1tenth_research) StdoutLine: {'line': b'copying f1tenth_research/teleop_node.py -> /research_ws/build/f1tenth_research/build/lib/f1tenth_research\n'}
+[2.271075] (f1tenth_research) StdoutLine: {'line': b'running install\n'}
+[2.275376] (f1tenth_research) StdoutLine: {'line': b'running install_lib\n'}
+[2.278500] (f1tenth_research) StdoutLine: {'line': b'creating /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research\n'}
+[2.279063] (f1tenth_research) StdoutLine: {'line': b'copying /research_ws/build/f1tenth_research/build/lib/f1tenth_research/__init__.py -> /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research\n'}
+[2.279472] (f1tenth_research) StdoutLine: {'line': b'copying /research_ws/build/f1tenth_research/build/lib/f1tenth_research/teleop_node.py -> /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research\n'}
+[2.280683] (f1tenth_research) StdoutLine: {'line': b'byte-compiling /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research/__init__.py to __init__.cpython-38.pyc\n'}
+[2.285773] (f1tenth_research) StdoutLine: {'line': b'byte-compiling /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research/teleop_node.py to teleop_node.cpython-38.pyc\n'}
+[2.286195] (f1tenth_research) StdoutLine: {'line': b'running install_data\n'}
+[2.286338] (f1tenth_research) StdoutLine: {'line': b'creating /research_ws/install/f1tenth_research/share/ament_index\n'}
+[2.286447] (f1tenth_research) StdoutLine: {'line': b'creating /research_ws/install/f1tenth_research/share/ament_index/resource_index\n'}
+[2.286531] (f1tenth_research) StdoutLine: {'line': b'creating /research_ws/install/f1tenth_research/share/ament_index/resource_index/packages\n'}
+[2.286631] (f1tenth_research) StdoutLine: {'line': b'copying resource/f1tenth_research -> /research_ws/install/f1tenth_research/share/ament_index/resource_index/packages\n'}
+[2.288875] (f1tenth_research) StdoutLine: {'line': b'copying package.xml -> /research_ws/install/f1tenth_research/share/f1tenth_research\n'}
+[2.289041] (f1tenth_research) StdoutLine: {'line': b'running install_egg_info\n'}
+[2.290210] (f1tenth_research) StdoutLine: {'line': b'Copying ../../build/f1tenth_research/f1tenth_research.egg-info to /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research-0.0.0-py3.8.egg-info\n'}
+[2.293693] (f1tenth_research) StdoutLine: {'line': b'running install_scripts\n'}
+[2.350516] (-) TimerEvent: {}
+[2.355341] (f1tenth_research) StdoutLine: {'line': b'Installing teleop script to /research_ws/install/f1tenth_research/lib/f1tenth_research\n'}
+[2.355825] (f1tenth_research) StdoutLine: {'line': b"writing list of installed files to '/research_ws/build/f1tenth_research/install.log'\n"}
+[2.422544] (f1tenth_research) CommandEnded: {'returncode': 0}
+[2.451588] (-) TimerEvent: {}
+[2.502543] (f1tenth_research) JobEnded: {'identifier': 'f1tenth_research', 'rc': 0}
+[2.503273] (-) EventReactorShutdown: {}

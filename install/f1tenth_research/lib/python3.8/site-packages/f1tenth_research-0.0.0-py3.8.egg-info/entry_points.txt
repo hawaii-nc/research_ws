@@ -1,0 +1,6 @@
+[console_scripts]
+il_driver = f1tenth_research.il_driver:main
+pure_pursuit = f1tenth_research.pure_pursuit:main
+recorder = f1tenth_research.recorder_node:main
+teleop = f1tenth_research.teleop_node:main
+

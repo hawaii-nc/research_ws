@@ -1,0 +1,16 @@
+running egg_info
+writing ../../build/f1tenth_research/f1tenth_research.egg-info/PKG-INFO
+writing dependency_links to ../../build/f1tenth_research/f1tenth_research.egg-info/dependency_links.txt
+writing entry points to ../../build/f1tenth_research/f1tenth_research.egg-info/entry_points.txt
+writing requirements to ../../build/f1tenth_research/f1tenth_research.egg-info/requires.txt
+writing top-level names to ../../build/f1tenth_research/f1tenth_research.egg-info/top_level.txt
+reading manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+writing manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+running build
+running build_py
+copying f1tenth_research/pure_pursuit.py -> /research_ws/build/f1tenth_research/build/lib/f1tenth_research
+running install
+running install_lib
+copying /research_ws/build/f1tenth_research/build/lib/f1tenth_research/pure_pursuit.py -> /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research
+byte-compiling /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research/pure_pursuit.py to pure_pursuit.cpython-38.pyc
+running install_data

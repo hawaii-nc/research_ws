@@ -1,0 +1,37 @@
+[1.728s] Invoking command in '/research_ws/src/f1tenth_research': PYTHONPATH=/research_ws/build/f1tenth_research/prefix_override:/research_ws/install/f1tenth_research/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/f1tenth_research build --build-base /research_ws/build/f1tenth_research/build install --record /research_ws/build/f1tenth_research/install.log --install-scripts $base/lib/f1tenth_research --single-version-externally-managed
+[2.173s] running egg_info
+[2.175s] creating ../../build/f1tenth_research/f1tenth_research.egg-info
+[2.176s] writing ../../build/f1tenth_research/f1tenth_research.egg-info/PKG-INFO
+[2.176s] writing dependency_links to ../../build/f1tenth_research/f1tenth_research.egg-info/dependency_links.txt
+[2.176s] writing entry points to ../../build/f1tenth_research/f1tenth_research.egg-info/entry_points.txt
+[2.176s] writing requirements to ../../build/f1tenth_research/f1tenth_research.egg-info/requires.txt
+[2.176s] writing top-level names to ../../build/f1tenth_research/f1tenth_research.egg-info/top_level.txt
+[2.188s] writing manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+[2.265s] reading manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+[2.267s] writing manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+[2.267s] running build
+[2.268s] running build_py
+[2.268s] creating /research_ws/build/f1tenth_research/build
+[2.269s] creating /research_ws/build/f1tenth_research/build/lib
+[2.269s] creating /research_ws/build/f1tenth_research/build/lib/f1tenth_research
+[2.269s] copying f1tenth_research/__init__.py -> /research_ws/build/f1tenth_research/build/lib/f1tenth_research
+[2.270s] copying f1tenth_research/teleop_node.py -> /research_ws/build/f1tenth_research/build/lib/f1tenth_research
+[2.270s] running install
+[2.274s] running install_lib
+[2.277s] creating /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research
+[2.278s] copying /research_ws/build/f1tenth_research/build/lib/f1tenth_research/__init__.py -> /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research
+[2.278s] copying /research_ws/build/f1tenth_research/build/lib/f1tenth_research/teleop_node.py -> /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research
+[2.280s] byte-compiling /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research/__init__.py to __init__.cpython-38.pyc
+[2.285s] byte-compiling /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research/teleop_node.py to teleop_node.cpython-38.pyc
+[2.285s] running install_data
+[2.285s] creating /research_ws/install/f1tenth_research/share/ament_index
+[2.285s] creating /research_ws/install/f1tenth_research/share/ament_index/resource_index
+[2.285s] creating /research_ws/install/f1tenth_research/share/ament_index/resource_index/packages
+[2.287s] copying resource/f1tenth_research -> /research_ws/install/f1tenth_research/share/ament_index/resource_index/packages
+[2.288s] copying package.xml -> /research_ws/install/f1tenth_research/share/f1tenth_research
+[2.288s] running install_egg_info
+[2.289s] Copying ../../build/f1tenth_research/f1tenth_research.egg-info to /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research-0.0.0-py3.8.egg-info
+[2.296s] running install_scripts
+[2.354s] Installing teleop script to /research_ws/install/f1tenth_research/lib/f1tenth_research
+[2.355s] writing list of installed files to '/research_ws/build/f1tenth_research/install.log'
+[2.423s] Invoked command in '/research_ws/src/f1tenth_research' returned '0': PYTHONPATH=/research_ws/build/f1tenth_research/prefix_override:/research_ws/install/f1tenth_research/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/f1tenth_research build --build-base /research_ws/build/f1tenth_research/build install --record /research_ws/build/f1tenth_research/install.log --install-scripts $base/lib/f1tenth_research --single-version-externally-managed

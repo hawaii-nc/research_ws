@@ -1,0 +1,22 @@
+[1.609s] Invoking command in '/research_ws/src/f1tenth_research': PYTHONPATH=/research_ws/build/f1tenth_research/prefix_override:/research_ws/install/f1tenth_research/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/f1tenth_research build --build-base /research_ws/build/f1tenth_research/build install --record /research_ws/build/f1tenth_research/install.log --install-scripts $base/lib/f1tenth_research --single-version-externally-managed
+[2.123s] running egg_info
+[2.123s] writing ../../build/f1tenth_research/f1tenth_research.egg-info/PKG-INFO
+[2.123s] writing dependency_links to ../../build/f1tenth_research/f1tenth_research.egg-info/dependency_links.txt
+[2.123s] writing entry points to ../../build/f1tenth_research/f1tenth_research.egg-info/entry_points.txt
+[2.124s] writing requirements to ../../build/f1tenth_research/f1tenth_research.egg-info/requires.txt
+[2.124s] writing top-level names to ../../build/f1tenth_research/f1tenth_research.egg-info/top_level.txt
+[2.203s] reading manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+[2.209s] writing manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+[2.209s] running build
+[2.209s] running build_py
+[2.212s] running install
+[2.214s] running install_lib
+[2.222s] running install_data
+[2.230s] running install_egg_info
+[2.231s] removing '/research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research-0.0.0-py3.8.egg-info' (and everything under it)
+[2.234s] Copying ../../build/f1tenth_research/f1tenth_research.egg-info to /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research-0.0.0-py3.8.egg-info
+[2.234s] running install_scripts
+[2.295s] Installing pure_pursuit script to /research_ws/install/f1tenth_research/lib/f1tenth_research
+[2.295s] Installing teleop script to /research_ws/install/f1tenth_research/lib/f1tenth_research
+[2.295s] writing list of installed files to '/research_ws/build/f1tenth_research/install.log'
+[2.441s] Invoked command in '/research_ws/src/f1tenth_research' returned '0': PYTHONPATH=/research_ws/build/f1tenth_research/prefix_override:/research_ws/install/f1tenth_research/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/f1tenth_research build --build-base /research_ws/build/f1tenth_research/build install --record /research_ws/build/f1tenth_research/install.log --install-scripts $base/lib/f1tenth_research --single-version-externally-managed

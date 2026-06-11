@@ -1,0 +1,30 @@
+[0.762s] Invoking command in '/research_ws/src/f1tenth_research': PYTHONPATH=/research_ws/build/f1tenth_research/prefix_override:/research_ws/install/f1tenth_research/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/f1tenth_research build --build-base /research_ws/build/f1tenth_research/build install --record /research_ws/build/f1tenth_research/install.log --install-scripts $base/lib/f1tenth_research --single-version-externally-managed
+[0.997s] running egg_info
+[0.997s] writing ../../build/f1tenth_research/f1tenth_research.egg-info/PKG-INFO
+[0.998s] writing dependency_links to ../../build/f1tenth_research/f1tenth_research.egg-info/dependency_links.txt
+[0.999s] writing entry points to ../../build/f1tenth_research/f1tenth_research.egg-info/entry_points.txt
+[0.999s] writing requirements to ../../build/f1tenth_research/f1tenth_research.egg-info/requires.txt
+[0.999s] writing top-level names to ../../build/f1tenth_research/f1tenth_research.egg-info/top_level.txt
+[1.041s] reading manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+[1.045s] writing manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+[1.045s] running build
+[1.045s] running build_py
+[1.045s] copying f1tenth_research/recorder_node.py -> /research_ws/build/f1tenth_research/build/lib/f1tenth_research
+[1.045s] copying f1tenth_research/il_driver.py -> /research_ws/build/f1tenth_research/build/lib/f1tenth_research
+[1.045s] running install
+[1.045s] running install_lib
+[1.047s] copying /research_ws/build/f1tenth_research/build/lib/f1tenth_research/recorder_node.py -> /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research
+[1.047s] copying /research_ws/build/f1tenth_research/build/lib/f1tenth_research/il_driver.py -> /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research
+[1.049s] byte-compiling /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research/recorder_node.py to recorder_node.cpython-38.pyc
+[1.055s] byte-compiling /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research/il_driver.py to il_driver.cpython-38.pyc
+[1.056s] running install_data
+[1.057s] running install_egg_info
+[1.059s] removing '/research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research-0.0.0-py3.8.egg-info' (and everything under it)
+[1.064s] Copying ../../build/f1tenth_research/f1tenth_research.egg-info to /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research-0.0.0-py3.8.egg-info
+[1.064s] running install_scripts
+[1.089s] Installing il_driver script to /research_ws/install/f1tenth_research/lib/f1tenth_research
+[1.089s] Installing pure_pursuit script to /research_ws/install/f1tenth_research/lib/f1tenth_research
+[1.089s] Installing recorder script to /research_ws/install/f1tenth_research/lib/f1tenth_research
+[1.089s] Installing teleop script to /research_ws/install/f1tenth_research/lib/f1tenth_research
+[1.090s] writing list of installed files to '/research_ws/build/f1tenth_research/install.log'
+[1.121s] Invoked command in '/research_ws/src/f1tenth_research' returned '0': PYTHONPATH=/research_ws/build/f1tenth_research/prefix_override:/research_ws/install/f1tenth_research/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/f1tenth_research build --build-base /research_ws/build/f1tenth_research/build install --record /research_ws/build/f1tenth_research/install.log --install-scripts $base/lib/f1tenth_research --single-version-externally-managed

@@ -1,0 +1,25 @@
+[2.286s] Invoking command in '/research_ws/src/f1tenth_research': PYTHONPATH=/research_ws/build/f1tenth_research/prefix_override:/research_ws/install/f1tenth_research/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/f1tenth_research build --build-base /research_ws/build/f1tenth_research/build install --record /research_ws/build/f1tenth_research/install.log --install-scripts $base/lib/f1tenth_research --single-version-externally-managed
+[3.193s] running egg_info
+[3.195s] writing ../../build/f1tenth_research/f1tenth_research.egg-info/PKG-INFO
+[3.200s] writing dependency_links to ../../build/f1tenth_research/f1tenth_research.egg-info/dependency_links.txt
+[3.200s] writing entry points to ../../build/f1tenth_research/f1tenth_research.egg-info/entry_points.txt
+[3.200s] writing requirements to ../../build/f1tenth_research/f1tenth_research.egg-info/requires.txt
+[3.200s] writing top-level names to ../../build/f1tenth_research/f1tenth_research.egg-info/top_level.txt
+[3.306s] reading manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+[3.308s] writing manifest file '../../build/f1tenth_research/f1tenth_research.egg-info/SOURCES.txt'
+[3.312s] running build
+[3.312s] running build_py
+[3.313s] copying f1tenth_research/teleop_node.py -> /research_ws/build/f1tenth_research/build/lib/f1tenth_research
+[3.313s] running install
+[3.314s] running install_lib
+[3.314s] copying /research_ws/build/f1tenth_research/build/lib/f1tenth_research/teleop_node.py -> /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research
+[3.315s] byte-compiling /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research/teleop_node.py to teleop_node.cpython-38.pyc
+[3.315s] running install_data
+[3.316s] running install_egg_info
+[3.316s] Sorry: TabError: inconsistent use of tabs and spaces in indentation (teleop_node.py, line 46)
+[3.324s] removing '/research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research-0.0.0-py3.8.egg-info' (and everything under it)
+[3.332s] Copying ../../build/f1tenth_research/f1tenth_research.egg-info to /research_ws/install/f1tenth_research/lib/python3.8/site-packages/f1tenth_research-0.0.0-py3.8.egg-info
+[3.333s] running install_scripts
+[3.405s] Installing teleop script to /research_ws/install/f1tenth_research/lib/f1tenth_research
+[3.408s] writing list of installed files to '/research_ws/build/f1tenth_research/install.log'
+[3.529s] Invoked command in '/research_ws/src/f1tenth_research' returned '0': PYTHONPATH=/research_ws/build/f1tenth_research/prefix_override:/research_ws/install/f1tenth_research/lib/python3.8/site-packages:${PYTHONPATH} /usr/bin/python3 setup.py egg_info --egg-base ../../build/f1tenth_research build --build-base /research_ws/build/f1tenth_research/build install --record /research_ws/build/f1tenth_research/install.log --install-scripts $base/lib/f1tenth_research --single-version-externally-managed

@@ -1,0 +1,6 @@
+source;share/f1tenth_research/hook/pythonpath.ps1
+source;share/f1tenth_research/hook/pythonpath.dsv
+source;share/f1tenth_research/hook/pythonpath.sh
+source;share/f1tenth_research/hook/ament_prefix_path.ps1
+source;share/f1tenth_research/hook/ament_prefix_path.dsv
+source;share/f1tenth_research/hook/ament_prefix_path.sh
