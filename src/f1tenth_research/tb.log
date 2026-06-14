@@ -6,5 +6,4 @@ nohup: ignoring input
 /usr/local/lib/python3.8/dist-packages/google/auth/crypt/es.py:21: CryptographyDeprecationWarning: Python 3.8 is no longer supported by the Python core team and support for it is deprecated in cryptography. The next release of cryptography will remove support for Python 3.8.
   import cryptography.exceptions
 TensorFlow installation not found - running with reduced feature set.
-Address already in use
-Port 6006 is in use by another program. Either identify and stop that program, or start the server with a different port.
+TensorBoard 2.14.0 at http://0.0.0.0:6007/ (Press CTRL+C to quit)
