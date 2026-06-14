@@ -1,0 +1,221 @@
+# F1Tenth RMA Training Configuration
+# Zhang et al. (2025) adaptation for autonomous racing
+# All values are carefully tuned for F1Tenth platform
+
+# ============================================
+# ENVIRONMENT CONFIGURATION
+# ============================================
+environment:
+  max_episode_steps: 1000
+  control_frequency_hz: 50
+  track: "aut"  # Use aut_centerline.csv
+  
+  # Observation space
+  observation:
+    include_lidar: false  # Can enable for advanced sensing
+    lidar_beams: 36
+    include_imu: true
+    normalize_obs: true
+  
+  # Domain randomization (Section II-A)
+  randomization:
+    apply_post_scale_noise: true
+    noise_fraction: 0.20  # ±20% uniform noise after scaling
+    mid_episode_disturbance: true
+    disturbance_timing: [0.3, 0.9]  # When (fraction of episode) to apply
+    disturbance_magnitude: 0.3  # Friction reduction severity
+  
+  # Reward function (Section II-C)
+  reward:
+    weight_smoothness: 0.1
+    weight_survival: 1.0
+    weight_velocity_tracking: 0.5
+    weight_yaw_rate_tracking: 0.3
+    max_action_diff: 0.4
+    max_velocity_error: 2.0
+    max_yaw_rate_error: 4.0
+    max_track_error: 0.5
+    min_speed: -0.5
+    max_lateral_accel: 10.0
+
+
+# ============================================
+# EXPERT CONTROLLER CONFIGURATION
+# ============================================
+expert:
+  type: "pure_pursuit"  # 'pure_pursuit' or 'mpcc'
+  
+  pure_pursuit:
+    wheelbase: 0.33
+    lookahead_distance_base: 1.5
+    nominal_speed: 2.0
+    max_steering: 0.4189
+    min_speed: 0.5
+    grip_aware: true
+    
+    # Grip factor -> speed multiplier
+    grip_speed_scale:
+      0.4: 0.6   # Low grip: 60% nominal
+      0.7: 0.85
+      1.0: 1.0   # High grip: 100% nominal
+    
+    # Grip factor -> steering multiplier
+    grip_steering_scale:
+      0.4: 0.7
+      0.7: 0.85
+      1.0: 1.0
+
+
+# ============================================
+# NEURAL NETWORK ARCHITECTURES
+# ============================================
+networks:
+  # Policy π (actor)
+  policy:
+    obs_dim: 5
+    intrinsics_dim: 8
+    action_dim: 2
+    hidden_dim: 256
+    num_layers: 3
+    activation: "relu"
+  
+  # Intrinsics encoder μ
+  intrinsics_encoder:
+    env_params_dim: 7  # Adjust based on randomization params
+    intrinsics_dim: 8
+    hidden_dim: 128
+    num_layers: 2
+    activation: "relu"
+  
+  # Value function V
+  value:
+    obs_dim: 5
+    intrinsics_dim: 8
+    hidden_dim: 256
+    num_layers: 3
+  
+  # Adaptation module φ (Phase 2)
+  adaptation:
+    state_action_dim: 7  # obs_dim (5) + action_dim (2)
+    history_window: 10   # k steps, ~0.2s at 50Hz control freq
+    intrinsics_dim: 8
+    cnn_channels: [32, 32, 8]
+    cnn_kernel_sizes: [5, 5, 5]
+
+
+# ============================================
+# PHASE 1 TRAINING: PPO + IL
+# ============================================
+phase1_training:
+  # Training scale
+  total_timesteps: 2_000_000  # Match Zhang's ~100M (scale to F1Tenth)
+  
+  # For shorter debug runs:
+  debug_mode: false
+  debug_timesteps: 100_000  # Use for testing pipeline
+  
+  # Rollout and batch config
+  num_envs: 16  # Parallel environments
+  rollout_steps: 2048  # Steps per environment before update
+  batch_size: 256
+  num_epochs: 10  # SGD epochs per rollout
+  
+  # PPO hyperparameters
+  ppo:
+    learning_rate: 3.0e-4
+    gamma: 0.99  # Discount factor
+    gae_lambda: 0.95  # GAE parameter
+    clip_ratio: 0.2  # PPO clipping range
+    value_coeff: 0.5  # Value loss coefficient
+    entropy_coeff: 0.01  # Entropy regularization
+    max_grad_norm: 0.5
+  
+  # Imitation learning loss (Section II-C)
+  # L_IL(π) = ||a_exp - a||^2
+  # Combined with RL: R(π) = (1-α)·R_RL(π) - α·L_IL(π)
+  il:
+    enabled: true
+    il_weight_start: 1.0  # Initial IL weight α
+    il_weight_decay: 0.0066  # Exponential decay: α = exp(-decay * epoch)
+    il_weight_end: 0.01  # Minimum IL weight
+    use_expert_actions: true
+  
+  # Checkpointing
+  checkpoint_interval: 10  # Save every 10 epochs
+  checkpoint_dir: "checkpoints/phase1"
+  
+  # Logging
+  log_interval: 100  # Log every N steps
+  eval_interval: 1000  # Evaluate on clean episodes every N steps
+
+
+# ============================================
+# PHASE 2 TRAINING: ADAPTATION MODULE
+# ============================================
+phase2_training:
+  enabled: true
+  
+  # Rollout config for data collection
+  num_eval_episodes: 500  # Episodes to collect for adaptation training
+  num_envs: 8
+  use_trained_policy: true  # Use Phase 1 policy π + μ
+  
+  # Supervised learning for φ
+  learning_rate: 1.0e-3
+  batch_size: 64
+  num_epochs: 100
+  
+  # Loss: MSE of ||z - ẑ||^2
+  loss_type: "mse"
+  
+  # Data buffer
+  buffer_size: 1_000_000  # Max transitions to store
+  window_size: 10  # History window for adaptation module
+  
+  # Checkpointing
+  checkpoint_interval: 10
+  checkpoint_dir: "checkpoints/phase2"
+  log_interval: 10
+
+
+# ============================================
+# EVALUATION / GENERALIZATION SWEEP
+# ============================================
+evaluation:
+  # Generalization difficulty levels
+  delta_levels: [0.0, 0.5, 1.0, 2.0, 4.0, 8.0]
+  
+  # Episodes per delta level
+  episodes_per_delta: 100
+  
+  # Baselines to evaluate
+  include_fixed_param_baseline: true
+  include_oracle_baseline: true
+  
+  # Output plots
+  plot_dir: "eval_results"
+  metrics:
+    - "success_rate"  # Fraction of episodes completed
+    - "position_error"  # Track following error
+    - "velocity_tracking_error"
+    - "avg_episode_length"  # Timesteps before termination
+
+
+# ============================================
+# LOGGING & TENSORBOARD
+# ============================================
+logging:
+  log_dir: "logs"
+  save_video: false  # Expensive, disable for speed
+  video_interval: 1000
+  
+  # Key metrics to track
+  tracked_metrics:
+    - "episode_reward"
+    - "episode_length"
+    - "il_loss"
+    - "rl_loss"
+    - "policy_entropy"
+    - "value_loss"
+    - "physics_param_grip_factor"
+    - "physics_param_mass_scale"

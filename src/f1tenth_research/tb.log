@@ -1,0 +1,10 @@
+nohup: ignoring input
+/usr/local/lib/python3.8/dist-packages/google/auth/__init__.py:52: FutureWarning: You are using a Python version 3.8 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.8"), FutureWarning)
+/usr/local/lib/python3.8/dist-packages/google/oauth2/__init__.py:38: FutureWarning: You are using a Python version 3.8 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.8"), FutureWarning)
+/usr/local/lib/python3.8/dist-packages/google/auth/crypt/es.py:21: CryptographyDeprecationWarning: Python 3.8 is no longer supported by the Python core team and support for it is deprecated in cryptography. The next release of cryptography will remove support for Python 3.8.
+  import cryptography.exceptions
+TensorFlow installation not found - running with reduced feature set.
+Address already in use
+Port 6006 is in use by another program. Either identify and stop that program, or start the server with a different port.
