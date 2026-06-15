@@ -12,7 +12,7 @@ environment:
   
   # Observation space
   observation:
-    include_lidar: false  # Can enable for advanced sensing
+    include_lidar: true  # Can enable for advanced sensing
     lidar_beams: 36
     include_imu: true
     normalize_obs: true

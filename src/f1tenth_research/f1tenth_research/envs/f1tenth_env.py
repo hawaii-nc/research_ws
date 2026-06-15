@@ -77,7 +77,12 @@ class F1TenthRMAEnv(gym.Env):
         """
         super().__init__()
         
-        self.config = config or self._default_config()
+        # config is the full YAML; environment-specific settings (reward,
+        # randomization, observation) live under config['environment'].
+        # Use that sub-dict as self.config so existing self.config.get(...)
+        # calls throughout this class resolve correctly.
+        full_config = config or {}
+        self.config = full_config.get('environment', None) or self._default_config()
         self.render_mode = render_mode
         self.track = track
         self.max_episode_steps = max_episode_steps
@@ -199,12 +204,13 @@ class F1TenthRMAEnv(gym.Env):
         physics_overrides = self._map_physics_params(self.current_physics_params)
         if self.base_env is None:
             raw_obs_vec = np.zeros(3, dtype=np.float32)
+            raw_obs_dict = None
         else:
-            raw_obs_vec, _ = self.base_env.reset(physics_overrides)
+            raw_obs_vec, raw_obs_dict = self.base_env.reset(physics_overrides)
         
         # Reset episode state
         self.prev_action = np.zeros(2, dtype=np.float32)
-        self.current_state = self._process_observation(raw_obs_vec, self.prev_action)
+        self.current_state = self._process_observation(raw_obs_vec, self.prev_action, raw_obs_dict)
         self.episode_step = 0
         self.total_episode_reward = 0.0
         
@@ -234,15 +240,40 @@ class F1TenthRMAEnv(gym.Env):
             overrides['I'] = 0.04712 * float(inertia_scale)
         return overrides
 
-    def _process_observation(self, raw_obs_vec: np.ndarray, last_action: np.ndarray) -> np.ndarray:
+    def _process_observation(self, raw_obs_vec: np.ndarray, last_action: np.ndarray,
+                              raw_obs_dict: Dict = None) -> np.ndarray:
         """
-        Build state vector xt = [v, steering, v_des, steering_des, yaw_rate]
+        Build state vector xt = [v, steering, v_des, steering_des, yaw_rate, (lidar...)]
         from real_env's [v, steering_proxy, yaw_rate] and last commanded action.
+
+        If observation.include_lidar is set, appends a downsampled, normalized
+        LiDAR scan. f110_gym returns 1080 beams in raw_obs_dict['scans']; we
+        subsample to observation.lidar_beams (default 36) evenly-spaced
+        indices, clip to observation.lidar_max_range meters (default 10.0),
+        and normalize to [0, 1] so it's on a comparable scale to the other
+        (roughly O(1)) observation components.
         """
         v, steering, yaw_rate = float(raw_obs_vec[0]), float(raw_obs_vec[1]), float(raw_obs_vec[2])
         steering_des = float(last_action[0])
         v_des = (float(last_action[1]) + 1.0) / 2.0 * 8.0  # match step()'s velocity_cmd mapping
-        return np.array([v, steering, v_des, steering_des, yaw_rate], dtype=np.float32)
+        base_obs = np.array([v, steering, v_des, steering_des, yaw_rate], dtype=np.float32)
+
+        obs_config = self.config.get('observation', {})
+        if not obs_config.get('include_lidar', False):
+            return base_obs
+
+        num_beams = obs_config.get('lidar_beams', 36)
+        max_range = obs_config.get('lidar_max_range', 10.0)
+
+        if raw_obs_dict is not None and 'scans' in raw_obs_dict:
+            full_scan = np.asarray(raw_obs_dict['scans'][0], dtype=np.float32)
+            indices = np.linspace(0, len(full_scan) - 1, num_beams).astype(int)
+            lidar = full_scan[indices]
+            lidar = np.clip(lidar, 0.0, max_range) / max_range
+        else:
+            lidar = np.zeros(num_beams, dtype=np.float32)
+
+        return np.concatenate([base_obs, lidar]).astype(np.float32)
     
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
         """
@@ -273,14 +304,15 @@ class F1TenthRMAEnv(gym.Env):
         # Step base environment
         if self.base_env is None:
             raw_obs_vec = np.zeros(3, dtype=np.float32)
+            raw_obs_dict = None
             terminated = False
         else:
-            raw_obs_vec, _, done, _ = self.base_env.step(sim_action)
+            raw_obs_vec, raw_obs_dict, done, _ = self.base_env.step(sim_action)
             terminated = bool(done)
         truncated = False
         
         # Process observation -> xt
-        obs = self._process_observation(raw_obs_vec, action)
+        obs = self._process_observation(raw_obs_vec, action, raw_obs_dict)
         
         # Extract state variables for reward computation (Zhang Section II-C)
         current_velocity = float(raw_obs_vec[0])

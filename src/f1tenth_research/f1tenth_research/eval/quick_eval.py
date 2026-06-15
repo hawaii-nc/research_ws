@@ -69,6 +69,8 @@ def main():
     parser.add_argument('--checkpoint', type=str, required=True)
     parser.add_argument('--num_episodes', type=int, default=5)
     parser.add_argument('--device', type=str, default='cpu')
+    parser.add_argument('--track', type=str, default='example_map',
+                       help="Track to evaluate on (e.g. 'example_map', 'aut', 'esp', 'gbr', 'mco', 'CornerHall')")
     args = parser.parse_args()
 
     with open(args.config, 'r') as f:
@@ -76,7 +78,7 @@ def main():
 
     device = torch.device(args.device)
 
-    env = F1TenthRMAEnv(config=config)
+    env = F1TenthRMAEnv(config=config, track=args.track)
 
     actor_critic = RMAActorCritic().to(device)
     ckpt = torch.load(args.checkpoint, map_location=device)
