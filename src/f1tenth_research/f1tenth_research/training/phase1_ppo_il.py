@@ -119,6 +119,7 @@ class Phase1Trainer:
         env = F1TenthRMAEnv(
             config=self.config,
             max_episode_steps=self.env_config.get('max_episode_steps', 1000),
+            track=self.env_config.get('track', 'example_map'),
         )
         return env
     
@@ -127,10 +128,17 @@ class Phase1Trainer:
         if not self.training_config.get('il', {}).get('use_expert_actions', False):
             return None
         
-        # Load real raceline waypoints (x_m, y_m columns, per config_example_map.yaml)
-        wpt_data = np.loadtxt('/f1tenth_gym/examples/example_waypoints.csv',
-                               delimiter=';', skiprows=3)
-        waypoints = wpt_data[:, 1:3]  # x_m, y_m columns
+        track = self.env_config.get('track', 'example_map')
+        if track == 'example_map':
+            # Real raceline waypoints (x_m, y_m columns), per f1tenth_gym example
+            wpt_data = np.loadtxt('/f1tenth_gym/examples/example_waypoints.csv',
+                                   delimiter=';', skiprows=3)
+            waypoints = wpt_data[:, 1:3]  # x_m, y_m columns
+        else:
+            # BDEvan5 benchmark centerline format: x, y, w_left, w_right (no header)
+            wpt_data = np.loadtxt(f'/research_ws/maps/{track}_centerline.csv',
+                                   delimiter=',')
+            waypoints = wpt_data[:, 0:2]  # x, y columns
         
         expert_type = self.expert_config.get('type', 'pure_pursuit')
         if expert_type == 'pure_pursuit':
@@ -490,6 +498,10 @@ def main():
     parser.add_argument('--device', type=str, default='auto',
                        help='Device: cuda, cpu, or auto')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--log_dir', type=str, default='logs/phase1',
+                       help='Directory for TensorBoard logs')
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/phase1',
+                       help='Directory for model checkpoints')
     args = parser.parse_args()
     
     # Load config
@@ -508,7 +520,7 @@ def main():
     print(f"Training on device: {device}")
     
     # Create trainer and train
-    trainer = Phase1Trainer(config, device=device)
+    trainer = Phase1Trainer(config, device=device, log_dir=args.log_dir, checkpoint_dir=args.checkpoint_dir)
     trainer.train()
 
 

@@ -90,7 +90,8 @@ class F1TenthRMAEnv(gym.Env):
         self.base_env = None
         if F1TENTH_GYM_AVAILABLE:
             try:
-                self.base_env = RealF110Wrapper(map_name='/f1tenth_gym/examples/example_map', timestep=0.01)
+                map_name = self._resolve_map_name(self.track)
+                self.base_env = RealF110Wrapper(map_name=map_name, timestep=0.01)
             except Exception as e:
                 warnings.warn(f"Failed to initialize f110_gym wrapper: {e}")
                 self.base_env = None
@@ -105,6 +106,20 @@ class F1TenthRMAEnv(gym.Env):
         self.episode_step = 0
         self.total_episode_reward = 0.0
     
+    def _resolve_map_name(self, track: str) -> str:
+        """
+        Map a track identifier to its f110_gym map path (no extension --
+        F110Env appends .png/.yaml itself).
+
+        'example_map' is special-cased to f1tenth_gym's bundled example,
+        used for the original Phase 1 validation run. All other track
+        names (aut, esp, gbr, mco, CornerHall) resolve to the
+        BDEvan5-based benchmark maps copied into /research_ws/maps/.
+        """
+        if track == 'example_map':
+            return '/f1tenth_gym/examples/example_map'
+        return f'/research_ws/maps/{track}'
+
     def _default_config(self) -> Dict:
         """Default environment configuration."""
         return {
