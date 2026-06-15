@@ -207,7 +207,8 @@ class Phase2Trainer:
                     
                     # Get action from policy
                     with torch.no_grad():
-                        action, _ = self.actor_critic.get_action_and_value(obs_tensor, intrinsics)
+                        mean, _ = self.actor_critic.policy(obs_tensor, intrinsics)
+                        action = mean
                     
                     # Build state-action pair
                     state_action = np.concatenate([obs, action.cpu().numpy()])
@@ -311,7 +312,8 @@ class Phase2Trainer:
                     ground_truth_z = self.actor_critic.get_intrinsics(env_params_tensor)
                     
                     # Get action
-                    action, _ = self.actor_critic.get_action_and_value(obs_tensor, ground_truth_z)
+                    mean, _ = self.actor_critic.policy(obs_tensor, ground_truth_z)
+                    action = mean
                     
                     # Build history
                     state_action = np.concatenate([obs, action.cpu().numpy()])

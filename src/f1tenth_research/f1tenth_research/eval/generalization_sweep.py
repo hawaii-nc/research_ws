@@ -157,9 +157,9 @@ class GeneralizationEvaluator:
                         # Use zero intrinsics if history not full yet
                         estimated_z = torch.zeros(8).to(self.device)
                     
-                    # Get action from policy π
-                    action, _ = self.actor_critic.get_action_and_value(obs_tensor, estimated_z)
-                    action_np = action.cpu().numpy()
+                    # Get deterministic action mean from policy π.
+                    mean, _ = self.actor_critic.policy(obs_tensor, estimated_z)
+                    action_np = mean.cpu().numpy()
                     
                     # Store for history
                     state_action = np.concatenate([obs, action_np])

@@ -37,12 +37,18 @@ class PolicyNetwork(nn.Module):
     Zhang et al. (2025) Section III-C, Equation (3):
     π_θ(at | xt, zt)
     
-    Architecture: 3-layer MLP with 256-dim hidden layers, ReLU activations.
-    Input: concatenation of state xt (obs_dim) + intrinsics zt (8D)
-    Output: action at (steering + throttle, 2D)
+    Gaussian actor: outputs a tanh-bounded mean and a state-independent
+    learnable log_std. PPO samples from Normal(mean, exp(log_std)) and uses
+    the resulting distribution for log-probabilities and entropy.
     """
     
-    def __init__(self, obs_dim: int = 5, intrinsics_dim: int = 8, action_dim: int = 2):
+    def __init__(
+        self,
+        obs_dim: int = 5,
+        intrinsics_dim: int = 8,
+        action_dim: int = 2,
+        log_std_init: float = -0.5,
+    ):
         """
         Initialize policy network.
         
@@ -50,6 +56,7 @@ class PolicyNetwork(nn.Module):
             obs_dim: Dimension of state observations xt (default 5 for base signals)
             intrinsics_dim: Dimension of intrinsics vector zt (default 8 per Zhang)
             action_dim: Dimension of action output (default 2: steering + throttle)
+            log_std_init: Initial value for the state-independent log std.
         """
         super().__init__()
         
@@ -60,7 +67,7 @@ class PolicyNetwork(nn.Module):
         input_dim = obs_dim + intrinsics_dim
         hidden_dim = 256
         
-        # 3-layer MLP: input -> hidden1 -> hidden2 -> output
+        # 3-layer MLP: input -> hidden1 -> hidden2 -> mean head
         self.network = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             nn.ReLU(),
@@ -68,6 +75,9 @@ class PolicyNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(hidden_dim, action_dim),
         )
+
+        # State-independent exploration scale for PPO.
+        self.log_std = nn.Parameter(torch.ones(action_dim) * log_std_init)
         
         # Initialize weights (default is fine, but can use Xavier if desired)
         self._initialize_weights()
@@ -79,21 +89,21 @@ class PolicyNetwork(nn.Module):
                 nn.init.orthogonal_(module.weight, gain=np.sqrt(2))
                 nn.init.constant_(module.bias, 0)
     
-    def forward(self, obs: torch.Tensor, intrinsics: torch.Tensor) -> torch.Tensor:
+    def forward(self, obs: torch.Tensor, intrinsics: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute policy action.
+        Compute policy distribution parameters.
         
         Args:
             obs: State observations xt, shape (batch_size, obs_dim) or (obs_dim,)
             intrinsics: Intrinsics vector zt, shape (batch_size, intrinsics_dim) or (intrinsics_dim,)
             
         Returns:
-            Action logits at, shape (batch_size, action_dim) or (action_dim,)
+            Tuple of (mean, log_std).
         """
         # Concatenate obs and intrinsics
         combined = torch.cat([obs, intrinsics], dim=-1)
-        # Bound output to [-1, 1] matching action_space (steering, throttle)
-        return torch.tanh(self.network(combined))
+        mean = torch.tanh(self.network(combined))
+        return mean, self.log_std
 
 
 class IntrinsicsEncoder(nn.Module):
@@ -388,7 +398,7 @@ class RMAActorCritic(nn.Module):
         self,
         obs: torch.Tensor,
         env_params: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass for actor-critic.
         
@@ -397,12 +407,12 @@ class RMAActorCritic(nn.Module):
             env_params: Environmental parameters (used to compute intrinsics)
             
         Returns:
-            Tuple of (action_logits, value_estimate)
+            Tuple of (mean, log_std, value_estimate)
         """
         intrinsics = self.encoder(env_params)
-        action = self.policy(obs, intrinsics)
+        mean, log_std = self.policy(obs, intrinsics)
         value = self.value(obs, intrinsics)
-        return action, value
+        return mean, log_std, value
     
     def get_intrinsics(self, env_params: torch.Tensor) -> torch.Tensor:
         """Get intrinsics for given environment parameters."""
@@ -412,15 +422,25 @@ class RMAActorCritic(nn.Module):
         self,
         obs: torch.Tensor,
         intrinsics: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        action: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Get action and value for given observations and intrinsics.
+        Get action, log-prob, entropy, value, and mean for given obs/intrinsics.
         
-        Used during rollout when intrinsics are already known.
+        If `action` is provided, evaluates the distribution at that action.
+        If `action` is None, samples a new action.
         """
-        action = self.policy(obs, intrinsics)
+        mean, log_std = self.policy(obs, intrinsics)
+        std = torch.exp(log_std)
+        dist = torch.distributions.Normal(mean, std)
+
+        if action is None:
+            action = dist.sample()
+
+        log_prob = dist.log_prob(action).sum(dim=-1)
+        entropy = dist.entropy().sum(dim=-1)
         value = self.value(obs, intrinsics)
-        return action, value
+        return action, log_prob, entropy, value, mean
 
 
 __all__ = [

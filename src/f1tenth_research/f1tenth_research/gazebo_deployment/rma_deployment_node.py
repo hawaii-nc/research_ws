@@ -221,9 +221,9 @@ class RMADeploymentNode(Node):
                 # Use zero intrinsics if history not full
                 estimated_intrinsics = torch.zeros(8).to(self.device)
             
-            # Compute action
-            action, _ = self.actor_cricket.get_action_and_value(state_tensor, estimated_intrinsics)
-            action_np = action.cpu().numpy()
+            # Compute deterministic action mean for deployment.
+            mean, _ = self.actor_critic.policy(state_tensor, estimated_intrinsics)
+            action_np = mean.cpu().numpy()
             
             # Store in history for next step
             state_action = np.concatenate([state, action_np])

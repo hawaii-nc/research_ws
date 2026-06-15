@@ -147,16 +147,18 @@ class Phase1Trainer:
         rewards: np.ndarray,
         values: np.ndarray,
         next_value: float,
+        dones: np.ndarray,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
-        Compute Generalized Advantage Estimation (GAE).
+        Compute Generalized Advantage Estimation (GAE) with episode masking.
         
         Args:
             rewards: Rewards received, shape (rollout_steps,)
             values: State values, shape (rollout_steps,)
-            next_value: Value of terminal state
+            next_value: Bootstrap value after the final step
+            dones: 1.0 if a step ended the episode, else 0.0
             gamma: Discount factor
             gae_lambda: GAE decay parameter
             
@@ -166,7 +168,7 @@ class Phase1Trainer:
             - returns: Cumulative returns (values + advantages)
         """
         advantages = np.zeros_like(rewards)
-        gae = 0
+        gae = 0.0
         
         for step in reversed(range(len(rewards))):
             if step == len(rewards) - 1:
@@ -174,8 +176,9 @@ class Phase1Trainer:
             else:
                 next_val = values[step + 1]
             
-            delta = rewards[step] + gamma * next_val - values[step]
-            gae = delta + gamma * gae_lambda * gae
+            mask = 1.0 - dones[step]
+            delta = rewards[step] + gamma * next_val * mask - values[step]
+            gae = delta + gamma * gae_lambda * mask * gae
             advantages[step] = gae
         
         returns = advantages + values
@@ -205,7 +208,8 @@ class Phase1Trainer:
         """
         Perform environment rollout for PPO.
         
-        Collects trajectories: (obs, action, reward, value, advantage, return, expert_action)
+        Collects trajectories: (obs, action, reward, value, log_prob, done, expert_action)
+        and computes GAE afterward.
         
         Args:
             num_steps: Number of steps to rollout
@@ -218,11 +222,12 @@ class Phase1Trainer:
             'actions': [],
             'rewards': [],
             'values': [],
+            'log_probs': [],
+            'dones': [],
             'advantages': [],
             'returns': [],
             'expert_actions': [],
             'intrinsics': [],
-            'log_probs': [],
         }
         
         obs, info = self.envs.reset()
@@ -240,7 +245,11 @@ class Phase1Trainer:
                 
                 # Get intrinsics and action
                 intrinsics = self.actor_critic.get_intrinsics(env_params_tensor)
-                action, value = self.actor_critic.get_action_and_value(obs_tensor, intrinsics)
+                action, log_prob, entropy, value, mean = self.actor_critic.get_action_and_value(obs_tensor, intrinsics)
+
+                # Clip only for the environment step. PPO keeps the log-prob of
+                # the original sample, which is what we store here.
+                env_action = torch.clamp(action, -1.0, 1.0)
                 
                 # Get expert action for IL
                 expert_action = None
@@ -250,22 +259,46 @@ class Phase1Trainer:
                     expert_action = self.get_expert_action(state_dict, env_params)
                 
                 # Step environment
-                obs, reward, terminated, truncated, info = self.envs.step(action.cpu().numpy())
+                obs, reward, terminated, truncated, info = self.envs.step(env_action.cpu().numpy())
+                done = bool(terminated or truncated)
                 
                 # Store rollout data
                 rollout_data['obs'].append(obs_tensor.cpu().numpy())
                 rollout_data['actions'].append(action.cpu().numpy())
                 rollout_data['rewards'].append(reward)
                 rollout_data['values'].append(value.cpu().numpy())
+                rollout_data['log_probs'].append(log_prob.cpu().numpy())
+                rollout_data['dones'].append(float(done))
                 rollout_data['intrinsics'].append(intrinsics.cpu().numpy())
                 if expert_action is not None:
                     rollout_data['expert_actions'].append(expert_action)
                 
                 self.global_step += 1
+
+                if done:
+                    obs, info = self.envs.reset()
+
+            final_obs_tensor = torch.from_numpy(obs if isinstance(obs, np.ndarray) else np.array(obs)).float().to(self.device)
+            final_env_params = info.get('physics_params', {})
+            final_env_params_tensor = torch.from_numpy(
+                np.array([final_env_params.get(k, 0) for k in ['grip_factor', 'mass_scale', 'inertia_scale', 'motor_steering_scale', 'motor_drive_scale', 'delay_steering', 'delay_drive']])
+            ).float().to(self.device)
+            final_intrinsics = self.actor_critic.get_intrinsics(final_env_params_tensor)
+            next_value = self.actor_critic.value(final_obs_tensor, final_intrinsics).cpu().numpy().item()
         
-        # Compute advantages and returns
-        advantages = np.array(rollout_data['values'])  # Placeholder
-        returns = advantages + np.array(rollout_data['rewards'])  # Placeholder
+        ppo_config = self.training_config.get('ppo', {})
+        rewards_arr = np.array(rollout_data['rewards'], dtype=np.float32)
+        values_arr = np.array(rollout_data['values'], dtype=np.float32)
+        dones_arr = np.array(rollout_data['dones'], dtype=np.float32)
+
+        advantages, returns = self.compute_gae(
+            rewards_arr,
+            values_arr,
+            next_value,
+            dones_arr,
+            gamma=ppo_config.get('gamma', 0.99),
+            gae_lambda=ppo_config.get('gae_lambda', 0.95),
+        )
         
         rollout_data['advantages'] = advantages
         rollout_data['returns'] = returns
@@ -277,9 +310,8 @@ class Phase1Trainer:
         Update policy and value function using collected rollout.
         
         Implements:
-        - PPO clipped objective for policy gradient
-        - IL loss for imitation: L_IL(π) = ||a_exp - a||^2
-        - Combined: R(π) = (1-α)·R_RL(π) - α·L_IL(π)
+        - PPO clipped surrogate objective for a Gaussian policy
+        - IL loss for imitation: L_IL(π) = ||a_exp - mean||^2
         - α = exp(-decay * epoch)
         
         Args:
@@ -297,6 +329,11 @@ class Phase1Trainer:
         
         batch_size = self.training_config.get('batch_size', 256)
         num_epochs = self.training_config.get('num_epochs', 10)
+        ppo_config = self.training_config.get('ppo', {})
+        clip_eps = ppo_config.get('clip_eps', ppo_config.get('clip_ratio', 0.2))
+        value_coeff = ppo_config.get('value_coeff', 0.5)
+        entropy_coeff = ppo_config.get('entropy_coeff', 0.01)
+        max_grad_norm = ppo_config.get('max_grad_norm', 0.5)
         
         # Convert rollout data to tensors
         obs_tensor = torch.from_numpy(np.array(rollout_data['obs'])).float().to(self.device)
@@ -304,6 +341,11 @@ class Phase1Trainer:
         returns_tensor = torch.from_numpy(rollout_data['returns']).float().to(self.device)
         advantages_tensor = torch.from_numpy(rollout_data['advantages']).float().to(self.device)
         intrinsics_tensor = torch.from_numpy(np.array(rollout_data['intrinsics'])).float().to(self.device)
+        old_log_probs_tensor = torch.from_numpy(np.array(rollout_data['log_probs'])).float().to(self.device)
+
+        expert_actions_tensor = None
+        if il_config.get('enabled', False) and len(rollout_data['expert_actions']) == len(rollout_data['obs']):
+            expert_actions_tensor = torch.from_numpy(np.array(rollout_data['expert_actions'])).float().to(self.device)
         
         # Normalize advantages
         advantages_tensor = (advantages_tensor - advantages_tensor.mean()) / (advantages_tensor.std() + 1e-8)
@@ -321,32 +363,27 @@ class Phase1Trainer:
                 returns_batch = returns_tensor[batch_indices]
                 advantages_batch = advantages_tensor[batch_indices]
                 intrinsics_batch = intrinsics_tensor[batch_indices]
+                old_log_probs_batch = old_log_probs_tensor[batch_indices]
                 
-                # Forward pass
-                action_logits, values = self.actor_critic.policy(obs_batch, intrinsics_batch), \
-                                       self.actor_critic.value(obs_batch, intrinsics_batch)
-                
-                # PPO loss
-                action_dist = torch.nn.functional.softmax(action_logits, dim=-1)  # Placeholder
-                action_log_probs = torch.log(action_dist + 1e-8).mean(dim=-1)
-                
-                entropy = -(action_dist * torch.log(action_dist + 1e-8)).sum(dim=-1).mean()
-                policy_loss = -(action_log_probs * advantages_batch).mean()
+                mean_batch, log_std_batch = self.actor_critic.policy(obs_batch, intrinsics_batch)
+                std_batch = torch.exp(log_std_batch)
+                dist = torch.distributions.Normal(mean_batch, std_batch)
+                new_log_probs = dist.log_prob(actions_batch).sum(dim=-1)
+                entropy = dist.entropy().sum(dim=-1).mean()
+                values = self.actor_critic.value(obs_batch, intrinsics_batch)
+
+                ratio = torch.exp(new_log_probs - old_log_probs_batch)
+                surr1 = ratio * advantages_batch
+                surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * advantages_batch
+                policy_loss = -torch.min(surr1, surr2).mean()
                 value_loss = ((values - returns_batch) ** 2).mean()
                 
-                # IL loss (if expert actions available)
-                il_loss = 0.0
-                if len(rollout_data['expert_actions']) > 0 and il_config.get('enabled', False):
-                    expert_actions_tensor = torch.from_numpy(
-                        np.array(rollout_data['expert_actions'][:len(batch_indices)])
-                    ).float().to(self.device)
-                    il_loss = ((action_logits - expert_actions_tensor) ** 2).mean()
+                il_loss = torch.tensor(0.0, device=self.device)
+                if expert_actions_tensor is not None:
+                    expert_actions_batch = expert_actions_tensor[batch_indices]
+                    il_loss = ((mean_batch - expert_actions_batch) ** 2).mean()
                 
                 # Combined loss
-                ppo_config = self.training_config.get('ppo', {})
-                value_coeff = ppo_config.get('value_coeff', 0.5)
-                entropy_coeff = ppo_config.get('entropy_coeff', 0.01)
-                
                 total_loss = policy_loss + value_coeff * value_loss - entropy_coeff * entropy
                 
                 if il_config.get('enabled', False):
@@ -358,17 +395,23 @@ class Phase1Trainer:
                 
                 grad_norm = nn.utils.clip_grad_norm_(
                     self.actor_critic.parameters(),
-                    ppo_config.get('max_grad_norm', 0.5)
+                    max_grad_norm
                 )
                 
                 self.optimizer.step()
+
+                with torch.no_grad():
+                    clip_fraction = ((ratio - 1.0).abs() > clip_eps).float().mean()
+                    approx_kl = (old_log_probs_batch - new_log_probs).mean()
                 
                 # Log metrics
                 self.metrics['policy_loss'].append(policy_loss.item())
                 self.metrics['value_loss'].append(value_loss.item())
                 self.metrics['entropy'].append(entropy.item())
+                self.metrics['clip_fraction'].append(clip_fraction.item())
+                self.metrics['approx_kl'].append(approx_kl.item())
                 if il_config.get('enabled', False):
-                    self.metrics['il_loss'].append(il_loss.item() if isinstance(il_loss, torch.Tensor) else il_loss)
+                    self.metrics['il_loss'].append(il_loss.item())
                 self.metrics['grad_norm'].append(grad_norm.item())
     
     def train(self):
