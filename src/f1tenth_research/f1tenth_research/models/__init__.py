@@ -92,7 +92,8 @@ class PolicyNetwork(nn.Module):
         """
         # Concatenate obs and intrinsics
         combined = torch.cat([obs, intrinsics], dim=-1)
-        return self.network(combined)
+        # Bound output to [-1, 1] matching action_space (steering, throttle)
+        return torch.tanh(self.network(combined))
 
 
 class IntrinsicsEncoder(nn.Module):
