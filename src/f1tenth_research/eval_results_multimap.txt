@@ -1,0 +1,20 @@
+Phase 1 LiDAR Multi-Map Evaluation Results
+==========================================
+Checkpoint: checkpoints/phase1_lidar/final.pt (obs_dim=41, trained on AUT, 977 epochs)
+Date: 2026-06-16
+
+Track        | Policy Reward | Random Reward | Random Steps | Notes
+-------------|---------------|---------------|--------------|-------
+AUT (train)  | 999.683       | 12.786        | 49.8         | Training track
+ESP (zero)   | 999.666       | 13.555        | 49.0         | Zero-shot
+GBR (zero)   | 999.638       | 15.825        | 56.2         | Zero-shot
+MCO (zero)   | 999.664       | 14.555        | 55.0         | Zero-shot
+example_map  | 998.833       | 46.478        | 171.2        | Zero-shot, different map source
+
+All 5/5 episodes hit 1000-step cap on every track.
+Max reward gap vs trained track: 0.850 (example_map, 0.085%)
+BDEvan5 benchmark tracks gap: 0.017-0.045 (essentially zero)
+
+NOTE: Reward measures velocity/yaw-rate tracking + survival, NOT lap completion
+or centerline deviation. Perfect reward does not guarantee optimal racing lines.
+Lap completion metric needed for stronger Paper 1 claim.
