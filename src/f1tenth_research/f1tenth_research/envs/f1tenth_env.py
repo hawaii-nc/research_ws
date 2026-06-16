@@ -362,6 +362,12 @@ class F1TenthRMAEnv(gym.Env):
             'total_episode_reward': self.total_episode_reward,
             'physics_params': self.current_physics_params,
         }
+        # Pass through position and lap data from f110_gym for lap completion
+        # and centerline deviation metrics in evaluation
+        if raw_obs_dict is not None:
+            info['poses_x'] = float(raw_obs_dict['poses_x'][0])
+            info['poses_y'] = float(raw_obs_dict['poses_y'][0])
+            info['lap_counts'] = int(raw_obs_dict['lap_counts'][0])
         if termination_reason is not None:
             info['termination_reason'] = termination_reason
         
