@@ -80,7 +80,7 @@ def main():
 
     env = F1TenthRMAEnv(config=config, track=args.track)
 
-    actor_critic = RMAActorCritic().to(device)
+    actor_critic = RMAActorCritic(obs_dim=env.observation_space.shape[0]).to(device)
     ckpt = torch.load(args.checkpoint, map_location=device)
     actor_critic.load_state_dict(ckpt['actor_critic'])
     actor_critic.eval()
