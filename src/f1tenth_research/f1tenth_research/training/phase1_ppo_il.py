@@ -84,7 +84,7 @@ class Phase1Trainer:
         self.envs = self._create_envs()
         
         # Get observation and action dimensions
-        self.obs_dim = self.envs.single_observation_space.shape[0] if hasattr(self.envs, 'single_observation_space') else 5
+        self.obs_dim = (self.envs.single_observation_space.shape[0] if hasattr(self.envs, 'single_observation_space') else self.envs.observation_space.shape[0])
         self.action_dim = self.envs.single_action_space.shape[0] if hasattr(self.envs, 'single_action_space') else 2
         self.env_params_dim = 7  # Configurable based on randomization
         
