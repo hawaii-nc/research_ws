@@ -109,7 +109,7 @@ class F1TenthRMAEnv(gym.Env):
         if F1TENTH_GYM_AVAILABLE:
             try:
                 map_name = self._resolve_map_name(self.track)
-                self.base_env = RealF110Wrapper(map_name=map_name, timestep=0.01)
+                self.base_env = RealF110Wrapper(map_name=map_name, timestep=0.01, track=self.track)
             except Exception as e:
                 warnings.warn(f"Failed to initialize f110_gym wrapper: {e}")
                 self.base_env = None

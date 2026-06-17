@@ -21,9 +21,10 @@ class RealF110Wrapper:
     reset(physics_params) -> obs_vec
     step(action) -> obs_vec, raw_obs_dict, done, info
     """
-    def __init__(self, map_name="/f1tenth_gym/examples/example_map", timestep=0.01):
+    def __init__(self, map_name="/f1tenth_gym/examples/example_map", timestep=0.01, track="example_map"):
         self.map_name = map_name
         self.timestep = timestep
+        self.track = track
         self.env = None
         self.last_steer = 0.0
         self.last_vel = 0.0
@@ -68,7 +69,30 @@ class RealF110Wrapper:
     def reset(self, physics_params=None):
         self._build_env(physics_params)
         self._setup_delay_queues(physics_params)
-        poses = np.array([[0.7, 0.0, 1.37079632679]])
+        # Spawn heading matches track's centerline direction at spawn point.
+        # AUT centerline runs at ~0 deg at spawn; example_map runs at ~78 deg.
+        # Read heading from config track setting so this works for any map.
+        import math
+        # Generic spawn heading: find nearest centerline point to [0.7,0.0]
+        # and compute heading from neighbors. Works for any map.
+        import os as _os
+        _cl_path = f'/research_ws/maps/{self.track}_centerline.csv'
+        if _os.path.exists(_cl_path):
+            _cl = np.loadtxt(_cl_path, delimiter=',')
+            _xy = _cl[:, 0:2]
+            _dists = np.sqrt((_xy[:,0]-0.7)**2 + (_xy[:,1]-0.0)**2)
+            _idx = int(np.argmin(_dists))
+            _ip = max(0, _idx-2)
+            _in = min(len(_cl)-1, _idx+2)
+            _dx = _xy[_in,0] - _xy[_ip,0]
+            _dy = _xy[_in,1] - _xy[_ip,1]
+            _cl_heading = float(np.arctan2(_dy, _dx))
+            # f110_gym: stheta=0 = +x direction, matches centerline heading.
+            # No correction needed.
+            _stheta = _cl_heading
+        else:
+            _stheta = 1.37079632679  # example_map default (pi/2 - 0.20)
+        poses = np.array([[0.7, 0.0, _stheta]])
         obs, _, _, _ = self.env.reset(poses)
         self.last_steer = 0.0
         self.last_vel = float(obs['linear_vels_x'][0])
