@@ -31,6 +31,9 @@ environment:
     weight_survival: 1.0
     weight_velocity_tracking: 0.5
     weight_yaw_rate_tracking: 0.3
+    weight_progress: 0.8
+    min_progress_speed: 0.5
+    max_progress_speed: 4.0
     max_action_diff: 0.4
     max_velocity_error: 2.0
     max_yaw_rate_error: 4.0

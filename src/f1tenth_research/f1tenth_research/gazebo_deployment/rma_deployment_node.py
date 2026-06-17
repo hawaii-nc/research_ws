@@ -210,7 +210,16 @@ class RMADeploymentNode(Node):
                 ).unsqueeze(0).float().to(self.device)
                 intrinsics = self.adaptation(history_tensor).squeeze(0)
             else:
-                intrinsics = torch.zeros(INTRINSICS_DIM, device=self.device)
+                # Use nominal physics params (all scales=1.0, delays=0.0)
+                # rather than zeros -- the policy was never trained with
+                # zero intrinsics, so zeros produce near-zero throttle.
+                # Nominal zt is the encoder output for a default-physics car.
+                nominal_params = torch.tensor(
+                    [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0],
+                    device=self.device
+                )
+                with torch.no_grad():
+                    intrinsics = self.actor_critic.get_intrinsics(nominal_params)
 
             # Deterministic action mean (no sampling at deployment time)
             mean, _ = self.actor_critic.policy(obs_tensor, intrinsics)
@@ -228,6 +237,7 @@ class RMADeploymentNode(Node):
 
         # Map throttle [-1,1] -> velocity [0,8] m/s (same as training)
         velocity_cmd = (throttle_cmd + 1.0) / 2.0 * MAX_VELOCITY
+        velocity_cmd = max(velocity_cmd, 1.5)  # floor: policy learned near-zero throttle
 
         # Publish
         msg = AckermannDriveStamped()

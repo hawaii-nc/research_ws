@@ -41,6 +41,9 @@ class RewardComputer:
             'weight_survival': 1.0,             # Per-timestep survival bonus
             'weight_velocity_tracking': 0.5,    # Velocity tracking error penalty
             'weight_yaw_rate_tracking': 0.3,    # Yaw rate tracking error penalty
+            'weight_progress': 0.8,             # Forward progress reward (prevents near-zero throttle exploit)
+            'min_progress_speed': 0.5,          # Speed below which progress reward is zero
+            'max_progress_speed': 4.0,          # Speed at which progress reward is maximal
             
             # Scaling parameters
             'max_action_diff': 0.4,             # Max steering angle for normalization
@@ -155,6 +158,27 @@ class RewardComputer:
         penalty = -self.config['weight_yaw_rate_tracking'] * normalized_error
         return penalty
     
+    def compute_progress_reward(self, current_velocity: float) -> float:
+        """
+        Forward progress reward: incentivizes actual movement.
+
+        Prevents the degenerate solution where the policy commands
+        near-zero throttle (desired_velocity ~ 0, current_velocity ~ 0,
+        velocity_error ~ 0) to exploit perfect velocity-tracking scores
+        while barely moving.
+
+        Returns reward proportional to forward speed, capped at
+        max_progress_speed. Zero below min_progress_speed.
+        """
+        min_speed = self.config.get('min_progress_speed', 0.5)
+        max_speed = self.config.get('max_progress_speed', 4.0)
+        weight = self.config.get('weight_progress', 0.8)
+
+        if current_velocity < min_speed:
+            return 0.0
+        normalized = min((current_velocity - min_speed) / (max_speed - min_speed), 1.0)
+        return weight * normalized
+
     def compute_step_reward(
         self,
         action: np.ndarray,
@@ -191,9 +215,10 @@ class RewardComputer:
         yaw_track = self.compute_yaw_rate_tracking_penalty(
             current_yaw_rate, desired_yaw_rate
         )
-        
+        progress = self.compute_progress_reward(current_velocity)
+
         # Composite reward (sum of weighted terms)
-        total_reward = smoothness + survival + velocity_track + yaw_track
+        total_reward = smoothness + survival + velocity_track + yaw_track + progress
         
         # Return breakdown for logging
         breakdown = {
@@ -201,6 +226,7 @@ class RewardComputer:
             'survival': survival,
             'velocity_tracking': velocity_track,
             'yaw_rate_tracking': yaw_track,
+            'progress': progress,
             'total': total_reward,
         }
         
