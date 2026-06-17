@@ -322,7 +322,9 @@ class F1TenthRMAEnv(gym.Env):
             terminated = False
         else:
             raw_obs_vec, raw_obs_dict, done, _ = self.base_env.step(sim_action)
-            terminated = bool(done)
+            # Terminate immediately on collision -- prevents wall-phasing exploit
+            collision_flag = bool(raw_obs_dict['collisions'][0]) if raw_obs_dict is not None else False
+            terminated = bool(done) or collision_flag
         truncated = False
         
         # Process observation -> xt

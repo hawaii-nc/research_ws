@@ -28,17 +28,17 @@ environment:
   # Reward function (Paper 1 = Baseline RMA, Paper 2 adds wall_proximity)
   reward:
     use_wall_proximity: false    # true = Physics-Limit-Aware RMA (Paper 2)
-    weight_progress: 2.0
+    weight_progress: 5.0
     weight_wall_proximity: 1.0
-    weight_smoothness: 0.1
-    weight_alive: 0.05
-    weight_collision: 20.0
+    weight_smoothness: 0.05
+    weight_alive: 0.01
+    weight_collision: 1.0
     max_progress_per_step: 0.5
     max_action_diff: 0.4
     max_velocity_error: 2.0
     max_yaw_rate_error: 4.0
     max_track_error: 0.5
-    min_speed: -0.5
+    min_speed: -0.1
     max_lateral_accel: 10.0
 
 
@@ -50,10 +50,10 @@ expert:
   
   pure_pursuit:
     wheelbase: 0.33
-    lookahead_distance_base: 1.5
-    nominal_speed: 2.0
+    lookahead_distance_base: 0.3
+    nominal_speed: 3.0
     max_steering: 0.4189
-    min_speed: 0.5
+    min_speed: 1.5
     grip_aware: true
     
     # Grip factor -> speed multiplier
@@ -118,7 +118,7 @@ phase1_training:
   debug_timesteps: 100_000  # Use for testing pipeline
   
   # Rollout and batch config
-  num_envs: 16  # Parallel environments
+  num_envs: 1  # Parallel environments
   rollout_steps: 2048  # Steps per environment before update
   batch_size: 256
   num_epochs: 10  # SGD epochs per rollout
@@ -160,7 +160,7 @@ phase2_training:
   
   # Rollout config for data collection
   num_eval_episodes: 500  # Episodes to collect for adaptation training
-  num_envs: 8
+  num_envs: 1
   use_trained_policy: true  # Use Phase 1 policy π + μ
   
   # Supervised learning for φ

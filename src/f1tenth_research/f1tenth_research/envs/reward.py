@@ -29,34 +29,24 @@ class RewardComputer:
     """
 
     def __init__(self, config: Dict = None, centerline: np.ndarray = None):
-        """
-        Args:
-            config: reward weights and parameters
-            centerline: Nx2 array of (x, y) centerline points for progress computation
-        """
         self.config = config or self._default_config()
-        self.centerline = centerline  # set after init if available
+        self.centerline = centerline
         self._prev_centerline_idx = None
 
     def _default_config(self) -> Dict:
         return {
-            # Variant selection
-            'use_wall_proximity': False,   # False = Baseline RMA, True = Physics-Limit-Aware RMA
+            'use_wall_proximity': False,
 
-            # Term weights
-            'weight_progress': 2.0,        # Arc-length progress along centerline per step
-            'weight_wall_proximity': 1.0,  # LiDAR-based safety penalty (Paper 2 only)
-            'weight_smoothness': 0.1,      # Action jerk penalty
-            'weight_alive': 0.05,          # Small survival bonus
-            'weight_collision': 20.0,      # Explicit collision penalty
+            'weight_progress': 2.0,
+            'weight_wall_proximity': 1.0,
+            'weight_smoothness': 0.1,
+            'weight_alive': 0.05,
+            'weight_collision': 20.0,
 
-            # Progress scaling
-            'max_progress_per_step': 0.5,  # Cap meters/step to avoid teleport spikes
+            'max_progress_per_step': 0.5,
 
-            # Smoothness
             'max_action_diff': 0.4,
 
-            # Legacy (kept for compatibility with existing code)
             'max_velocity_error': 2.0,
             'max_yaw_rate_error': 4.0,
             'max_track_error': 0.5,
@@ -65,30 +55,18 @@ class RewardComputer:
         }
 
     def set_centerline(self, centerline: np.ndarray):
-        """Set centerline array (Nx2, x/y columns) for progress computation."""
         self.centerline = centerline
         self._prev_centerline_idx = None
 
     def reset_episode(self):
-        """Call at episode start to reset progress tracking."""
         self._prev_centerline_idx = None
 
     def _nearest_centerline_idx(self, x: float, y: float) -> int:
-        """Find index of nearest centerline point to (x, y)."""
         dx = self.centerline[:, 0] - x
         dy = self.centerline[:, 1] - y
         return int(np.argmin(dx**2 + dy**2))
 
     def compute_progress(self, poses_x: float, poses_y: float) -> float:
-        """
-        Arc-length progress along centerline this step.
-
-        Projects car position onto nearest centerline point, computes
-        how many points forward it moved since last step, converts to
-        meters using average point spacing.
-
-        Returns 0 if centerline not set or first step of episode.
-        """
         if self.centerline is None or poses_x is None:
             return 0.0
 
@@ -101,45 +79,45 @@ class RewardComputer:
         n = len(self.centerline)
         prev_idx = self._prev_centerline_idx
 
-        # Forward progress (handles wraparound)
         delta_idx = (idx - prev_idx) % n
 
-        # Ignore large jumps (teleport/reset artifacts)
         if delta_idx > n // 4:
             delta_idx = 0
 
-        # Convert index delta to meters using average spacing
         if delta_idx > 0:
-            # Average spacing of centerline points
-            total_len = np.sum(np.sqrt(
-                np.diff(self.centerline[:, 0])**2 +
-                np.diff(self.centerline[:, 1])**2
-            ))
+            total_len = np.sum(
+                np.sqrt(
+                    np.diff(self.centerline[:, 0])**2 +
+                    np.diff(self.centerline[:, 1])**2
+                )
+            )
             avg_spacing = total_len / (n - 1)
             progress_m = delta_idx * avg_spacing
         else:
             progress_m = 0.0
 
-        # Cap to avoid spikes
         progress_m = min(progress_m, self.config['max_progress_per_step'])
+
+        # DEBUG PROGRESS
+        if np.random.rand() < 0.001:
+            print(
+                f"[PROGRESS DEBUG] "
+                f"prev_idx={prev_idx}, "
+                f"idx={idx}, "
+                f"delta_idx={delta_idx}, "
+                f"progress_m={progress_m:.5f}"
+            )
 
         self._prev_centerline_idx = idx
         return progress_m
 
     def compute_wall_proximity_penalty(self, lidar_obs: np.ndarray) -> float:
-        """
-        LiDAR-based wall proximity penalty (Paper 2 term).
-
-        min(lidar) near 0 = wall very close = high penalty.
-        min(lidar) near 1 = open space = no penalty.
-
-        lidar_obs: normalized [0,1] array (36 beams from obs[5:41])
-        """
         if lidar_obs is None or len(lidar_obs) == 0:
             return 0.0
+
         min_dist = float(np.min(lidar_obs))
-        # Penalty increases as walls get closer
         proximity = 1.0 - min_dist
+
         return -self.config['weight_wall_proximity'] * proximity
 
     def compute_smoothness_penalty(
@@ -147,10 +125,13 @@ class RewardComputer:
         action: np.ndarray,
         prev_action: Optional[np.ndarray]
     ) -> float:
+
         if prev_action is None:
             return 0.0
+
         action_diff = np.linalg.norm(action - prev_action)
         normalized = action_diff / self.config['max_action_diff']
+
         return -self.config['weight_smoothness'] * normalized
 
     def compute_step_reward(
@@ -166,24 +147,52 @@ class RewardComputer:
         lidar_obs: np.ndarray = None,
         collision: bool = False,
     ) -> Tuple[float, Dict[str, float]]:
-        """
-        Compute composite reward.
 
-        New parameters vs old signature:
-            poses_x, poses_y: car world position (from info dict)
-            lidar_obs: normalized 36-beam LiDAR array (obs[5:41])
-            collision: True if f110_gym reports collision this step
-        """
-        progress = self.config['weight_progress'] * self.compute_progress(poses_x, poses_y)
-        smoothness = self.compute_smoothness_penalty(action, prev_action)
+        progress = (
+            self.config['weight_progress']
+            * self.compute_progress(poses_x, poses_y)
+        )
+
+        smoothness = self.compute_smoothness_penalty(
+            action,
+            prev_action
+        )
+
         alive = self.config['weight_alive']
-        collision_penalty = -self.config['weight_collision'] if collision else 0.0
+
+        collision_penalty = (
+            -self.config['weight_collision']
+            if collision
+            else 0.0
+        )
 
         wall = 0.0
-        if self.config.get('use_wall_proximity', False) and lidar_obs is not None:
+
+        if (
+            self.config.get('use_wall_proximity', False)
+            and lidar_obs is not None
+        ):
             wall = self.compute_wall_proximity_penalty(lidar_obs)
 
-        total = progress + smoothness + alive + collision_penalty + wall
+        total = (
+            progress
+            + smoothness
+            + alive
+            + collision_penalty
+            + wall
+        )
+
+        # DEBUG REWARD
+        if np.random.rand() < 0.001:
+            print(
+                f"[REWARD DEBUG] "
+                f"progress={progress:.4f}, "
+                f"smooth={smoothness:.4f}, "
+                f"alive={alive:.4f}, "
+                f"collision={collision_penalty:.4f}, "
+                f"wall={wall:.4f}, "
+                f"total={total:.4f}"
+            )
 
         breakdown = {
             'progress': progress,
@@ -193,6 +202,7 @@ class RewardComputer:
             'wall_proximity': wall,
             'total': total,
         }
+
         return total, breakdown
 
     def compute_episode_termination(
@@ -201,13 +211,25 @@ class RewardComputer:
         track_error: Optional[float] = None,
         lateral_accel: Optional[float] = None,
     ) -> Tuple[bool, Optional[str]]:
+
         velocity = state.get('velocity', 0.0)
+
         if velocity < self.config['min_speed']:
             return True, f"stuck_reversing (v={velocity:.2f})"
-        if track_error is not None and track_error > self.config['max_track_error']:
+
+        if (
+            track_error is not None
+            and track_error > self.config['max_track_error']
+        ):
             return True, f"off_track (error={track_error:.2f}m)"
+
         return False, None
 
     def config_summary(self) -> str:
-        variant = "Physics-Limit-Aware RMA" if self.config.get('use_wall_proximity') else "Baseline RMA"
+        variant = (
+            "Physics-Limit-Aware RMA"
+            if self.config.get('use_wall_proximity')
+            else "Baseline RMA"
+        )
+
         return f"Reward variant: {variant}"
