@@ -2,13 +2,21 @@
 F1Tenth Reward Function for RMA Training
 ==========================================
 
-Implements Zhang et al. (2025) Section II-C: composite reward function with four terms:
-1. Output smoothness penalty: -||a_t - a_{t-1}||
-2. Survival reward: δt (constant per-timestep)
-3. Velocity tracking deviation: -||v_t - v_des||
-4. Yaw-rate tracking deviation: -||ω_t - ω_des||
+Two variants for Paper 1 / Paper 2 comparison:
 
-All weights are configurable via config dict.
+Baseline RMA (Paper 1):
+    R = 2.0*progress - 0.1*smoothness + 0.05*alive - 20*collision
+
+Physics-Limit-Aware RMA (Paper 2):
+    R = 2.0*progress - 1.0*wall_proximity - 0.1*smoothness + 0.05*alive - 20*collision
+
+Progress = arc-length advancement along centerline this step.
+Wall proximity = 1 - min(lidar_36_beams) -- close walls -> high penalty.
+Collision = detected by f110_gym collisions flag.
+
+Key design principle: reward depends ONLY on environment state,
+not on policy outputs. Eliminates the circular dependency that
+caused the near-zero throttle degenerate solution.
 """
 
 from typing import Dict, Tuple, Optional
@@ -17,271 +25,189 @@ import numpy as np
 
 class RewardComputer:
     """
-    Computes composite reward signal for F1Tenth RMA training.
-    Maps (state, action, physics_params) -> scalar reward.
+    Computes composite reward for F1Tenth RMA training.
     """
-    
-    def __init__(self, config: Dict = None):
+
+    def __init__(self, config: Dict = None, centerline: np.ndarray = None):
         """
-        Initialize reward computer with configurable weights.
-        
         Args:
-            config: Dictionary with reward weights and scaling parameters
+            config: reward weights and parameters
+            centerline: Nx2 array of (x, y) centerline points for progress computation
         """
         self.config = config or self._default_config()
-    
+        self.centerline = centerline  # set after init if available
+        self._prev_centerline_idx = None
+
     def _default_config(self) -> Dict:
-        """
-        Default reward weights and parameters.
-        Zhang et al. (2025) uses these in ablation studies.
-        """
         return {
-            # Term weights (sum should be ~1.0 or normalized separately)
-            'weight_smoothness': 0.1,           # Output smoothness penalty
-            'weight_survival': 1.0,             # Per-timestep survival bonus
-            'weight_velocity_tracking': 0.5,    # Velocity tracking error penalty
-            'weight_yaw_rate_tracking': 0.3,    # Yaw rate tracking error penalty
-            'weight_progress': 0.8,             # Forward progress reward (prevents near-zero throttle exploit)
-            'min_progress_speed': 0.5,          # Speed below which progress reward is zero
-            'max_progress_speed': 4.0,          # Speed at which progress reward is maximal
-            
-            # Scaling parameters
-            'max_action_diff': 0.4,             # Max steering angle for normalization
-            'max_velocity_error': 2.0,          # Max v error for normalization
-            'max_yaw_rate_error': 1.0,          # Max ω error for normalization
-            
-            # Episode termination conditions (hard constraints)
-            'max_track_error': 0.5,             # Off-track threshold (meters)
-            'min_speed': -0.5,                  # Minimum reverse speed before stopping
-            'max_lateral_accel': 10.0,          # Max lateral acceleration (m/s^2)
+            # Variant selection
+            'use_wall_proximity': False,   # False = Baseline RMA, True = Physics-Limit-Aware RMA
+
+            # Term weights
+            'weight_progress': 2.0,        # Arc-length progress along centerline per step
+            'weight_wall_proximity': 1.0,  # LiDAR-based safety penalty (Paper 2 only)
+            'weight_smoothness': 0.1,      # Action jerk penalty
+            'weight_alive': 0.05,          # Small survival bonus
+            'weight_collision': 20.0,      # Explicit collision penalty
+
+            # Progress scaling
+            'max_progress_per_step': 0.5,  # Cap meters/step to avoid teleport spikes
+
+            # Smoothness
+            'max_action_diff': 0.4,
+
+            # Legacy (kept for compatibility with existing code)
+            'max_velocity_error': 2.0,
+            'max_yaw_rate_error': 4.0,
+            'max_track_error': 0.5,
+            'min_speed': -0.5,
+            'max_lateral_accel': 10.0,
         }
-    
+
+    def set_centerline(self, centerline: np.ndarray):
+        """Set centerline array (Nx2, x/y columns) for progress computation."""
+        self.centerline = centerline
+        self._prev_centerline_idx = None
+
+    def reset_episode(self):
+        """Call at episode start to reset progress tracking."""
+        self._prev_centerline_idx = None
+
+    def _nearest_centerline_idx(self, x: float, y: float) -> int:
+        """Find index of nearest centerline point to (x, y)."""
+        dx = self.centerline[:, 0] - x
+        dy = self.centerline[:, 1] - y
+        return int(np.argmin(dx**2 + dy**2))
+
+    def compute_progress(self, poses_x: float, poses_y: float) -> float:
+        """
+        Arc-length progress along centerline this step.
+
+        Projects car position onto nearest centerline point, computes
+        how many points forward it moved since last step, converts to
+        meters using average point spacing.
+
+        Returns 0 if centerline not set or first step of episode.
+        """
+        if self.centerline is None or poses_x is None:
+            return 0.0
+
+        idx = self._nearest_centerline_idx(poses_x, poses_y)
+
+        if self._prev_centerline_idx is None:
+            self._prev_centerline_idx = idx
+            return 0.0
+
+        n = len(self.centerline)
+        prev_idx = self._prev_centerline_idx
+
+        # Forward progress (handles wraparound)
+        delta_idx = (idx - prev_idx) % n
+
+        # Ignore large jumps (teleport/reset artifacts)
+        if delta_idx > n // 4:
+            delta_idx = 0
+
+        # Convert index delta to meters using average spacing
+        if delta_idx > 0:
+            # Average spacing of centerline points
+            total_len = np.sum(np.sqrt(
+                np.diff(self.centerline[:, 0])**2 +
+                np.diff(self.centerline[:, 1])**2
+            ))
+            avg_spacing = total_len / (n - 1)
+            progress_m = delta_idx * avg_spacing
+        else:
+            progress_m = 0.0
+
+        # Cap to avoid spikes
+        progress_m = min(progress_m, self.config['max_progress_per_step'])
+
+        self._prev_centerline_idx = idx
+        return progress_m
+
+    def compute_wall_proximity_penalty(self, lidar_obs: np.ndarray) -> float:
+        """
+        LiDAR-based wall proximity penalty (Paper 2 term).
+
+        min(lidar) near 0 = wall very close = high penalty.
+        min(lidar) near 1 = open space = no penalty.
+
+        lidar_obs: normalized [0,1] array (36 beams from obs[5:41])
+        """
+        if lidar_obs is None or len(lidar_obs) == 0:
+            return 0.0
+        min_dist = float(np.min(lidar_obs))
+        # Penalty increases as walls get closer
+        proximity = 1.0 - min_dist
+        return -self.config['weight_wall_proximity'] * proximity
+
     def compute_smoothness_penalty(
         self,
         action: np.ndarray,
         prev_action: Optional[np.ndarray]
     ) -> float:
-        """
-        Output smoothness penalty: -||a_t - a_{t-1}||
-        
-        Encourages smooth control outputs to avoid jerkiness.
-        
-        Args:
-            action: Current action [steering, throttle] shape (2,)
-            prev_action: Previous action [steering, throttle] or None if first step
-            
-        Returns:
-            Penalty term (negative value)
-        """
         if prev_action is None:
             return 0.0
-        
-        # Compute L2 norm of action difference
         action_diff = np.linalg.norm(action - prev_action)
-        
-        # Normalize by max action magnitude for scale-invariance
-        max_diff = self.config['max_action_diff']
-        normalized_diff = action_diff / max_diff
-        
-        # Apply weight and return negative (penalty)
-        penalty = -self.config['weight_smoothness'] * normalized_diff
-        return penalty
-    
-    def compute_survival_reward(self) -> float:
-        """
-        Survival reward: δt (constant per-timestep bonus)
-        
-        Zhang et al. (2025): encourages agent to stay on track.
-        In physical racing, trajectory length (time) is critical.
-        
-        Returns:
-            Constant reward per timestep
-        """
-        return self.config['weight_survival']
-    
-    def compute_velocity_tracking_penalty(
-        self,
-        current_velocity: float,
-        desired_velocity: float
-    ) -> float:
-        """
-        Velocity tracking deviation penalty: -||v_t - v_des||
-        
-        Penalizes deviation from desired velocity setpoint.
-        
-        Args:
-            current_velocity: Current longitudinal velocity (m/s)
-            desired_velocity: Desired velocity command (m/s)
-            
-        Returns:
-            Penalty term (negative value)
-        """
-        velocity_error = abs(current_velocity - desired_velocity)
-        
-        # Normalize by max error threshold
-        max_error = self.config['max_velocity_error']
-        normalized_error = velocity_error / max_error
-        
-        # Clip to [0, 1] to avoid unbounded penalties
-        normalized_error = np.clip(normalized_error, 0, 1)
-        
-        penalty = -self.config['weight_velocity_tracking'] * normalized_error
-        return penalty
-    
-    def compute_yaw_rate_tracking_penalty(
-        self,
-        current_yaw_rate: float,
-        desired_yaw_rate: float
-    ) -> float:
-        """
-        Yaw-rate tracking deviation penalty: -||ω_t - ω_des||
-        
-        Zhang et al. (2025) uses torque tracking over angular velocity.
-        For F1Tenth, yaw rate (ω) is the most direct low-level signal available.
-        
-        Args:
-            current_yaw_rate: Current yaw rate (rad/s)
-            desired_yaw_rate: Desired yaw rate (rad/s)
-            
-        Returns:
-            Penalty term (negative value)
-        """
-        yaw_rate_error = abs(current_yaw_rate - desired_yaw_rate)
-        
-        # Normalize by max error threshold
-        max_error = self.config['max_yaw_rate_error']
-        normalized_error = yaw_rate_error / max_error
-        
-        # Clip to [0, 1]
-        normalized_error = np.clip(normalized_error, 0, 1)
-        
-        penalty = -self.config['weight_yaw_rate_tracking'] * normalized_error
-        return penalty
-    
-    def compute_progress_reward(self, current_velocity: float) -> float:
-        """
-        Forward progress reward: incentivizes actual movement.
-
-        Prevents the degenerate solution where the policy commands
-        near-zero throttle (desired_velocity ~ 0, current_velocity ~ 0,
-        velocity_error ~ 0) to exploit perfect velocity-tracking scores
-        while barely moving.
-
-        Returns reward proportional to forward speed, capped at
-        max_progress_speed. Zero below min_progress_speed.
-        """
-        min_speed = self.config.get('min_progress_speed', 0.5)
-        max_speed = self.config.get('max_progress_speed', 4.0)
-        weight = self.config.get('weight_progress', 0.8)
-
-        if current_velocity < min_speed:
-            return 0.0
-        normalized = min((current_velocity - min_speed) / (max_speed - min_speed), 1.0)
-        return weight * normalized
+        normalized = action_diff / self.config['max_action_diff']
+        return -self.config['weight_smoothness'] * normalized
 
     def compute_step_reward(
         self,
         action: np.ndarray,
         prev_action: Optional[np.ndarray],
-        current_velocity: float,
-        desired_velocity: float,
-        current_yaw_rate: float,
-        desired_yaw_rate: float,
+        current_velocity: float = 0.0,
+        desired_velocity: float = 0.0,
+        current_yaw_rate: float = 0.0,
+        desired_yaw_rate: float = 0.0,
+        poses_x: float = None,
+        poses_y: float = None,
+        lidar_obs: np.ndarray = None,
+        collision: bool = False,
     ) -> Tuple[float, Dict[str, float]]:
         """
-        Compute composite reward for a single timestep.
-        
-        Zhang et al. (2025) Section II-C: R(at) = weighted sum of four terms.
-        
-        Args:
-            action: Current action [steering_cmd, throttle_cmd]
-            prev_action: Previous action (for smoothness penalty)
-            current_velocity: Measured longitudinal velocity
-            desired_velocity: Velocity setpoint
-            current_yaw_rate: Measured yaw rate (rad/s)
-            desired_yaw_rate: Yaw rate setpoint (rad/s)
-            
-        Returns:
-            Tuple of:
-            - total_reward: scalar reward for this step
-            - reward_breakdown: dict with individual term contributions
-        """
-        # Compute each term
-        smoothness = self.compute_smoothness_penalty(action, prev_action)
-        survival = self.compute_survival_reward()
-        velocity_track = self.compute_velocity_tracking_penalty(
-            current_velocity, desired_velocity
-        )
-        yaw_track = self.compute_yaw_rate_tracking_penalty(
-            current_yaw_rate, desired_yaw_rate
-        )
-        progress = self.compute_progress_reward(current_velocity)
+        Compute composite reward.
 
-        # Composite reward (sum of weighted terms)
-        total_reward = smoothness + survival + velocity_track + yaw_track + progress
-        
-        # Return breakdown for logging
+        New parameters vs old signature:
+            poses_x, poses_y: car world position (from info dict)
+            lidar_obs: normalized 36-beam LiDAR array (obs[5:41])
+            collision: True if f110_gym reports collision this step
+        """
+        progress = self.config['weight_progress'] * self.compute_progress(poses_x, poses_y)
+        smoothness = self.compute_smoothness_penalty(action, prev_action)
+        alive = self.config['weight_alive']
+        collision_penalty = -self.config['weight_collision'] if collision else 0.0
+
+        wall = 0.0
+        if self.config.get('use_wall_proximity', False) and lidar_obs is not None:
+            wall = self.compute_wall_proximity_penalty(lidar_obs)
+
+        total = progress + smoothness + alive + collision_penalty + wall
+
         breakdown = {
-            'smoothness': smoothness,
-            'survival': survival,
-            'velocity_tracking': velocity_track,
-            'yaw_rate_tracking': yaw_track,
             'progress': progress,
-            'total': total_reward,
+            'smoothness': smoothness,
+            'alive': alive,
+            'collision': collision_penalty,
+            'wall_proximity': wall,
+            'total': total,
         }
-        
-        return total_reward, breakdown
-    
+        return total, breakdown
+
     def compute_episode_termination(
         self,
         state: Dict,
         track_error: Optional[float] = None,
         lateral_accel: Optional[float] = None,
     ) -> Tuple[bool, Optional[str]]:
-        """
-        Determine if episode should terminate (hard constraints).
-        
-        Args:
-            state: Current state dict
-            track_error: Lateral deviation from centerline (meters)
-            lateral_accel: Computed lateral acceleration (m/s^2)
-            
-        Returns:
-            Tuple of:
-            - done: bool, whether episode is finished
-            - reason: str, termination reason (or None if continuing)
-        """
-        # Check off-track
-        if track_error is not None:
-            max_error = self.config['max_track_error']
-            if track_error > max_error:
-                return True, f"off_track (error={track_error:.2f}m)"
-        
-        # Check min speed (reverse limit)
         velocity = state.get('velocity', 0.0)
         if velocity < self.config['min_speed']:
             return True, f"stuck_reversing (v={velocity:.2f})"
-        
-        # Check lateral acceleration (rollover/loss of traction)
-        if lateral_accel is not None:
-            max_accel = self.config['max_lateral_accel']
-            if lateral_accel > max_accel:
-                return True, f"excessive_lateral_accel ({lateral_accel:.1f}m/s²)"
-        
+        if track_error is not None and track_error > self.config['max_track_error']:
+            return True, f"off_track (error={track_error:.2f}m)"
         return False, None
-    
+
     def config_summary(self) -> str:
-        """
-        Return human-readable summary of reward configuration.
-        """
-        lines = [
-            "=== Reward Function Configuration ===",
-            f"Smoothness weight: {self.config['weight_smoothness']:.3f}",
-            f"Survival weight: {self.config['weight_survival']:.3f}",
-            f"Velocity tracking weight: {self.config['weight_velocity_tracking']:.3f}",
-            f"Yaw rate tracking weight: {self.config['weight_yaw_rate_tracking']:.3f}",
-            f"Max track error: {self.config['max_track_error']:.2f}m",
-            f"Max velocity error: {self.config['max_velocity_error']:.2f}m/s",
-            f"Max yaw rate error: {self.config['max_yaw_rate_error']:.2f}rad/s",
-        ]
-        return "\n".join(lines)
+        variant = "Physics-Limit-Aware RMA" if self.config.get('use_wall_proximity') else "Baseline RMA"
+        return f"Reward variant: {variant}"

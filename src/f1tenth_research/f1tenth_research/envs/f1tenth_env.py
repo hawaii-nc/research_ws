@@ -90,6 +90,19 @@ class F1TenthRMAEnv(gym.Env):
         # Initialize components
         self.randomizer = PhysicsRandomizer(self.config.get('randomization', {}))
         self.reward_computer = RewardComputer(self.config.get('reward', {}))
+
+        # Load centerline for progress reward (if available for this track)
+        import os
+        centerline_path = f'/research_ws/maps/{self.track}_centerline.csv'
+        if os.path.exists(centerline_path):
+            try:
+                cl = np.loadtxt(centerline_path, delimiter=',')
+                self.reward_computer.set_centerline(cl[:, 0:2])
+                self._centerline_loaded = True
+            except Exception:
+                self._centerline_loaded = False
+        else:
+            self._centerline_loaded = False
         
         # Underlying f1tenth_gym environment
         self.base_env = None
@@ -213,6 +226,7 @@ class F1TenthRMAEnv(gym.Env):
         self.current_state = self._process_observation(raw_obs_vec, self.prev_action, raw_obs_dict)
         self.episode_step = 0
         self.total_episode_reward = 0.0
+        self.reward_computer.reset_episode()
         
         # Prepare info dict with physics parameters
         # Note: zt (intrinsics) would be computed by encoder μ during training
@@ -324,6 +338,12 @@ class F1TenthRMAEnv(gym.Env):
         desired_yaw_rate = velocity_cmd * np.tan(steer_cmd) / wheelbase
         
         # Compute composite reward (Zhang Section II-C)
+        # Extract position and collision for new reward terms
+        _poses_x = float(raw_obs_dict['poses_x'][0]) if raw_obs_dict is not None else None
+        _poses_y = float(raw_obs_dict['poses_y'][0]) if raw_obs_dict is not None else None
+        _collision = bool(raw_obs_dict['collisions'][0]) if raw_obs_dict is not None else False
+        _lidar_obs = obs[5:] if len(obs) > 5 else None
+
         step_reward, reward_breakdown = self.reward_computer.compute_step_reward(
             action=action,
             prev_action=self.prev_action,
@@ -331,6 +351,10 @@ class F1TenthRMAEnv(gym.Env):
             desired_velocity=desired_velocity,
             current_yaw_rate=current_yaw_rate,
             desired_yaw_rate=desired_yaw_rate,
+            poses_x=_poses_x,
+            poses_y=_poses_y,
+            lidar_obs=_lidar_obs,
+            collision=_collision,
         )
         
         # Add mid-episode disturbance if configured
