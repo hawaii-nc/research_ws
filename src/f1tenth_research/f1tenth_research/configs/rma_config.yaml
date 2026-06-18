@@ -27,7 +27,7 @@ environment:
   
   # Reward function (Paper 1 = Baseline RMA, Paper 2 adds wall_proximity)
   reward:
-    use_wall_proximity: false    # true = Physics-Limit-Aware RMA (Paper 2)
+    use_wall_proximity: true    # true = Physics-Limit-Aware RMA (Paper 2)
     weight_progress: 5.0
     weight_wall_proximity: 1.0
     weight_smoothness: 0.05

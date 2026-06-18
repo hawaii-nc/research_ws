@@ -237,7 +237,7 @@ class RMADeploymentNode(Node):
 
         # Map throttle [-1,1] -> velocity [0,8] m/s (same as training)
         velocity_cmd = (throttle_cmd + 1.0) / 2.0 * MAX_VELOCITY
-        velocity_cmd = max(velocity_cmd, 1.5)  # floor: policy learned near-zero throttle
+        # No velocity floor -- policy now outputs meaningful throttle
 
         # Publish
         msg = AckermannDriveStamped()
