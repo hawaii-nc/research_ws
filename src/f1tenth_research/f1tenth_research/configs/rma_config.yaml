@@ -142,6 +142,12 @@ phase1_training:
     il_weight_decay: 0.0066  # Exponential decay: α = exp(-decay * epoch)
     il_weight_end: 0.01  # Minimum IL weight
     use_expert_actions: true
+    rescue:
+      plateau_window: 50       # epochs to check for flat reward
+      plateau_threshold: 0.01  # min improvement to not trigger rescue
+      rescue_il_weight: 0.3    # IL weight to jump back to on rescue
+      rescue_decay: 0.05       # how fast rescue IL decays after trigger
+      max_rescues: 3           # max rescue triggers per training run
   
   # Checkpointing
   checkpoint_interval: 10  # Save every 10 epochs

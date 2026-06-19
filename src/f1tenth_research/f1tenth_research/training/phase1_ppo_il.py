@@ -98,6 +98,12 @@ class Phase1Trainer:
         
         # Initialize expert controller
         self.expert = self._create_expert()
+
+        # Adaptive IL rescue state
+        self._reward_history = []       # rolling epoch rewards
+        self._rescue_count = 0          # how many rescues triggered
+        self._rescue_epoch = -999       # last epoch rescue triggered
+        self._rescue_il_weight = 0.0    # current rescue boost (0 = not in rescue)
         
         # Optimizers
         ppo_config = self.training_config.get('ppo', {})
@@ -326,14 +332,49 @@ class Phase1Trainer:
             rollout_data: Data from rollout()
             epoch: Current training epoch
         """
-        # Compute IL weight decay
+        # Compute IL weight: exponential decay + adaptive rescue
         il_config = self.training_config.get('il', {})
         il_decay = il_config.get('il_weight_decay', 0.001)
-        il_weight = il_config.get('il_weight_start', 1.0)
-        
-        # Exponential decay: α = exp(-decay * epoch)
-        il_weight = il_weight * np.exp(-il_decay * epoch)
-        il_weight = max(il_weight, il_config.get('il_weight_end', 0.01))
+        il_weight_start = il_config.get('il_weight_start', 1.0)
+        il_weight_end = il_config.get('il_weight_end', 0.01)
+
+        # Standard exponential decay (Zhang et al.)
+        base_il_weight = il_weight_start * np.exp(-il_decay * epoch)
+        base_il_weight = max(base_il_weight, il_weight_end)
+
+        # Rescue parameters
+        rescue_config = il_config.get('rescue', {})
+        plateau_window = rescue_config.get('plateau_window', 50)
+        plateau_threshold = rescue_config.get('plateau_threshold', 0.01)
+        rescue_weight = rescue_config.get('rescue_il_weight', 0.3)
+        rescue_decay = rescue_config.get('rescue_decay', 0.05)
+        max_rescues = rescue_config.get('max_rescues', 3)
+
+        # Check for plateau and trigger rescue if needed
+        if (len(self._reward_history) >= plateau_window * 2
+                and self._rescue_count < max_rescues
+                and epoch - self._rescue_epoch > plateau_window):
+            recent = np.mean(self._reward_history[-plateau_window:])
+            prior = np.mean(self._reward_history[-plateau_window*2:-plateau_window])
+            improvement = recent - prior
+            if improvement < plateau_threshold:
+                self._rescue_count += 1
+                self._rescue_epoch = epoch
+                self._rescue_il_weight = rescue_weight
+                print(f"[IL RESCUE #{self._rescue_count}] Plateau detected "
+                      f"(improvement={improvement:.4f} < {plateau_threshold}). "
+                      f"Boosting IL weight to {rescue_weight:.3f}")
+
+        # Decay rescue weight if active
+        if self._rescue_il_weight > il_weight_end:
+            epochs_since_rescue = epoch - self._rescue_epoch
+            self._rescue_il_weight = rescue_weight * np.exp(
+                -rescue_decay * epochs_since_rescue
+            )
+            self._rescue_il_weight = max(self._rescue_il_weight, 0.0)
+
+        # Final IL weight: max of base decay and active rescue
+        il_weight = max(base_il_weight, self._rescue_il_weight)
         
         batch_size = self.training_config.get('batch_size', 256)
         num_epochs = self.training_config.get('num_epochs', 10)
@@ -449,6 +490,7 @@ class Phase1Trainer:
             # Logging
             if epoch % log_interval == 0:
                 avg_reward = np.mean(rollout_data['rewards']) if len(rollout_data['rewards']) > 0 else 0
+                self._reward_history.append(avg_reward)  # track for adaptive IL rescue
                 print(f"[Epoch {epoch}] Step {self.global_step}: Avg Reward = {avg_reward:.3f}")
                 
                 self.writer.add_scalar('train/avg_reward', avg_reward, self.global_step)
