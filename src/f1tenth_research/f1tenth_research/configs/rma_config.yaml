@@ -27,14 +27,14 @@ environment:
   
   # Reward function (Paper 1 = Baseline RMA, Paper 2 adds wall_proximity)
   reward:
-    use_wall_proximity: true    # true = Physics-Limit-Aware RMA (Paper 2)
+    use_wall_proximity: false    # true = Physics-Limit-Aware RMA (Paper 2)
     weight_progress: 5.0
-    weight_wall_proximity: 1.0
-    weight_smoothness: 0.05
+    weight_wall_proximity: 0.2
+    weight_smoothness: 0.1
     weight_alive: 0.01
     weight_collision: 1.0
     max_progress_per_step: 0.5
-    max_action_diff: 0.4
+    max_action_diff: 0.2
     max_velocity_error: 2.0
     max_yaw_rate_error: 4.0
     max_track_error: 0.5
