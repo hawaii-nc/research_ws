@@ -34,6 +34,14 @@ environment:
     weight_alive: 0.01
     weight_collision: 1.0
     max_progress_per_step: 0.5
+    weight_speed_turn: 0.5        # penalizes high speed + high steering
+    speed_turn_steer_threshold: 0.15  # rad -- below this no penalty
+    weight_close_wall: 0.1        # sustained wall proximity per step
+    close_wall_threshold: 0.05    # normalized lidar (0.05 = 0.5m real)
+    weight_speed_turn: 0.5        # penalizes high speed + high steering
+    speed_turn_steer_threshold: 0.15  # rad -- below this no penalty
+    weight_close_wall: 0.1        # sustained wall proximity per step
+    close_wall_threshold: 0.05    # normalized lidar (0.05 = 0.5m real)
     max_action_diff: 0.2
     max_velocity_error: 2.0
     max_yaw_rate_error: 4.0
