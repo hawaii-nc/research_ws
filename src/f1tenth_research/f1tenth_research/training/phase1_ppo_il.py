@@ -281,66 +281,119 @@ class Phase1Trainer:
         }
         
         obs, info = self.envs.reset()
-        
+        is_vec = hasattr(self.envs, 'num_envs')
+        n_envs = self.envs.num_envs if is_vec else 1
+
+        def to2d(o):
+            o = np.array(o, dtype=np.float32)
+            return o if o.ndim == 2 else o[np.newaxis]
+
+        def get_ep_tensor(info_, idx=0):
+            """Extract physics params as 1D tensor for env idx."""
+            try:
+                if isinstance(info_, (list, tuple)):
+                    d = info_[idx] if idx < len(info_) else {}
+                elif isinstance(info_, dict):
+                    raw = info_.get('physics_params', {})
+                    d = raw[idx] if isinstance(raw, (list,tuple)) else raw
+                else:
+                    d = {}
+                if not isinstance(d, dict):
+                    d = {}
+                def s(v, default):
+                    if isinstance(v, (list, np.ndarray)):
+                        return float(np.array(v).flat[0])
+                    return float(v) if v is not None else float(default)
+                arr = np.array([
+                    s(d.get('grip_factor'),        1.0),
+                    s(d.get('mass_scale'),          1.0),
+                    s(d.get('inertia_scale'),       1.0),
+                    s(d.get('motor_steering_scale'),1.0),
+                    s(d.get('motor_drive_scale'),   1.0),
+                    s(d.get('delay_steering'),      0.0),
+                    s(d.get('delay_drive'),         0.0),
+                ], dtype=np.float32)
+            except Exception:
+                arr = np.array([1.,1.,1.,1.,1.,0.,0.], dtype=np.float32)
+            return torch.from_numpy(arr).float().to(self.device)
+
         with torch.no_grad():
             for step in range(num_steps):
-                # Convert obs to tensor
-                obs_tensor = torch.from_numpy(obs if isinstance(obs, np.ndarray) else np.array(obs)).float().to(self.device)
-                
-                # Get environment parameters
-                env_params = info.get('physics_params', {})
-                env_params_tensor = torch.from_numpy(
-                    np.array([env_params.get(k, 0) for k in ['grip_factor', 'mass_scale', 'inertia_scale', 'motor_steering_scale', 'motor_drive_scale', 'delay_steering', 'delay_drive']])
-                ).float().to(self.device)
-                
-                # Get intrinsics and action
-                intrinsics = self.actor_critic.get_intrinsics(env_params_tensor)
-                action, log_prob, entropy, value, mean = self.actor_critic.get_action_and_value(obs_tensor, intrinsics)
+                obs2d = to2d(obs)  # (n_envs, obs_dim)
 
-                # Clip only for the environment step. PPO keeps the log-prob of
-                # the original sample, which is what we store here.
-                env_action = torch.clamp(action, -1.0, 1.0)
-                
-                # Get expert action for IL
+                actions_list, log_probs_list, values_list, intrinsics_list = [], [], [], []
+                for i in range(n_envs):
+                    ep_t = get_ep_tensor(info, i)
+                    intr = self.actor_critic.get_intrinsics(ep_t)
+                    obs_t = torch.from_numpy(obs2d[i]).float().to(self.device)
+                    a, lp, _, v, _ = self.actor_critic.get_action_and_value(obs_t, intr)
+                    actions_list.append(a)
+                    log_probs_list.append(lp)
+                    values_list.append(v)
+                    intrinsics_list.append(intr)
+
+                actions_batch    = torch.stack(actions_list)
+                log_probs_batch  = torch.stack(log_probs_list)
+                values_batch     = torch.stack(values_list)
+                intrinsics_batch = torch.stack(intrinsics_list)
+
+                env_action = torch.clamp(actions_batch, -1.0, 1.0).cpu().numpy()
+                if not is_vec:
+                    env_action = env_action[0]
+
+                # Expert action from first env
                 expert_action = None
                 if self.expert is not None:
-                    # Convert obs_tensor back to state dict for expert
-                    state_dict = {'position': (obs[0], obs[1]), 'yaw': obs[2], 'velocity': obs[3], 'yaw_rate': obs[4]}
-                    expert_action = self.get_expert_action(state_dict, env_params)
-                
-                # Step environment
-                obs, reward, terminated, truncated, info = self.envs.step(env_action.cpu().numpy())
-                done = bool(terminated or truncated)
-                
-                # Store rollout data
-                rollout_data['obs'].append(obs_tensor.cpu().numpy())
-                rollout_data['actions'].append(action.cpu().numpy())
-                rollout_data['rewards'].append(reward)
-                rollout_data['values'].append(value.cpu().numpy())
-                rollout_data['log_probs'].append(log_prob.cpu().numpy())
-                rollout_data['dones'].append(float(done))
-                rollout_data['intrinsics'].append(intrinsics.cpu().numpy())
-                if expert_action is not None:
-                    rollout_data['expert_actions'].append(expert_action)
-                
-                self.global_step += 1
+                    try:
+                        d0 = (info[0] if isinstance(info,(list,tuple))
+                              else info).get('physics_params', {}) if isinstance(
+                              info[0] if isinstance(info,(list,tuple)) else info, dict) else {}
+                        o0 = obs2d[0]
+                        state_dict = {
+                            'position': (float(o0[0]), float(o0[1])),
+                            'yaw': float(o0[2]),
+                            'velocity': float(o0[3]),
+                            'yaw_rate': float(o0[4])
+                        }
+                        expert_action = self.get_expert_action(state_dict, d0)
+                    except Exception:
+                        expert_action = None
 
-                if done:
-                    obs, info = self.envs.reset()
+                obs, reward, terminated, truncated, info = self.envs.step(env_action)
 
-            final_obs_tensor = torch.from_numpy(obs if isinstance(obs, np.ndarray) else np.array(obs)).float().to(self.device)
-            final_env_params = info.get('physics_params', {})
-            final_env_params_tensor = torch.from_numpy(
-                np.array([final_env_params.get(k, 0) for k in ['grip_factor', 'mass_scale', 'inertia_scale', 'motor_steering_scale', 'motor_drive_scale', 'delay_steering', 'delay_drive']])
-            ).float().to(self.device)
-            final_intrinsics = self.actor_critic.get_intrinsics(final_env_params_tensor)
-            next_value = self.actor_critic.value(final_obs_tensor, final_intrinsics).cpu().numpy().item()
-        
+                if is_vec:
+                    rewards = np.array(reward, dtype=np.float32)
+                    dones   = np.array(np.logical_or(terminated, truncated), dtype=np.float32)
+                else:
+                    rewards = np.array([float(reward)], dtype=np.float32)
+                    dones   = np.array([float(bool(terminated or truncated))], dtype=np.float32)
+                    if dones[0]:
+                        obs, info = self.envs.reset()
+
+                for i in range(n_envs):
+                    rollout_data['obs'].append(obs2d[i])
+                    rollout_data['actions'].append(actions_batch[i].cpu().numpy())
+                    rollout_data['rewards'].append(float(rewards[i]))
+                    rollout_data['values'].append(values_batch[i].cpu().numpy())
+                    rollout_data['log_probs'].append(log_probs_batch[i].cpu().numpy())
+                    rollout_data['dones'].append(float(dones[i]))
+                    rollout_data['intrinsics'].append(intrinsics_batch[i].cpu().numpy())
+                    if expert_action is not None:
+                        rollout_data['expert_actions'].append(expert_action)
+
+                self.global_step += n_envs
+
+            # Bootstrap value
+            obs2d_f = to2d(obs)
+            ep_f = get_ep_tensor(info, 0)
+            intr_f = self.actor_critic.get_intrinsics(ep_f)
+            obs_f  = torch.from_numpy(obs2d_f[0]).float().to(self.device)
+            next_value = self.actor_critic.value(obs_f, intr_f).cpu().numpy().item()
+
         ppo_config = self.training_config.get('ppo', {})
         rewards_arr = np.array(rollout_data['rewards'], dtype=np.float32)
-        values_arr = np.array(rollout_data['values'], dtype=np.float32)
+        values_arr = np.array(rollout_data['values'], dtype=np.float32).flatten()
         dones_arr = np.array(rollout_data['dones'], dtype=np.float32)
-
         advantages, returns = self.compute_gae(
             rewards_arr,
             values_arr,
@@ -349,10 +402,9 @@ class Phase1Trainer:
             gamma=ppo_config.get('gamma', 0.99),
             gae_lambda=ppo_config.get('gae_lambda', 0.95),
         )
-        
         rollout_data['advantages'] = advantages
         rollout_data['returns'] = returns
-        
+
         return rollout_data
     
     def update(self, rollout_data: Dict, epoch: int):
