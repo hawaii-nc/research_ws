@@ -51,6 +51,11 @@ class RealF110Wrapper:
 
         self.env = F110Env(map=self.map_name, map_ext=".png",
                             params=params, num_agents=1, timestep=self.timestep)
+        # Increase iTTC threshold for more realistic collision detection.
+        # Default 0.005s triggers at 4cm at 8m/s -- too lenient, allows wall grazing.
+        # 0.05s triggers at 40cm -- within car half-width, stops wall phasing.
+        for agent in self.env.agents:
+            agent.ttc_thresh = 0.05
 
     def _setup_delay_queues(self, physics_params):
         """Initialize FIFO delay buffers. Queue length N means an action
