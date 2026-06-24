@@ -54,7 +54,7 @@ class RealF110Wrapper:
         # Increase iTTC threshold for more realistic collision detection.
         # Default 0.005s triggers at 4cm at 8m/s -- too lenient, allows wall grazing.
         # 0.05s triggers at 40cm -- within car half-width, stops wall phasing.
-        for agent in self.env.agents:
+        for agent in self.env.sim.agents:
             agent.ttc_thresh = 0.05
 
     def _setup_delay_queues(self, physics_params):
