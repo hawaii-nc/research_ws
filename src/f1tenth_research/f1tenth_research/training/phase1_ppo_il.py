@@ -119,15 +119,51 @@ class Phase1Trainer:
         self.metrics = defaultdict(list)
     
     def _create_envs(self):
-        """Create parallel environments (vectorized)."""
-        # For now, create single environment
-        # TODO: Use gym.vector.AsyncVectorEnv for parallel execution
-        env = F1TenthRMAEnv(
-            config=self.config,
-            max_episode_steps=self.env_config.get('max_episode_steps', 1000),
-            track=self.env_config.get('track', 'example_map'),
-        )
-        return env
+        """Create parallel environments using multiprocessing spawn context.
+
+        Uses spawn (not fork) to avoid shared memory conflicts with f110_gym
+        inside Docker. Each worker process runs an independent F1TenthRMAEnv.
+        Falls back to single env if num_envs=1 or if multiprocessing fails.
+        """
+        num_envs = self.num_envs
+        config = self.config
+        max_steps = self.env_config.get('max_episode_steps', 1000)
+        track = self.env_config.get('track', 'example_map')
+
+        if num_envs <= 1:
+            env = F1TenthRMAEnv(
+                config=config,
+                max_episode_steps=max_steps,
+                track=track,
+            )
+            return env
+
+        # Parallel environments using subprocess workers
+        import multiprocessing as mp
+        import gymnasium as gym
+        from gymnasium.vector import AsyncVectorEnv
+
+        def make_env_fn(cfg, ms, tr):
+            def _init():
+                return F1TenthRMAEnv(config=cfg, max_episode_steps=ms, track=tr)
+            return _init
+
+        try:
+            # Set spawn context before creating AsyncVectorEnv
+            # to avoid fork-related shared memory conflicts with f110_gym
+            mp.set_start_method('spawn', force=True)
+            env_fns = [make_env_fn(config, max_steps, track) for _ in range(num_envs)]
+            vec_env = AsyncVectorEnv(env_fns)
+            print(f"[ParallelEnv] Created {num_envs} parallel environments (spawn)")
+            return vec_env
+        except Exception as e:
+            print(f"[ParallelEnv] Failed to create parallel envs: {e}")
+            print("[ParallelEnv] Falling back to single environment")
+            return F1TenthRMAEnv(
+                config=config,
+                max_episode_steps=max_steps,
+                track=track,
+            )
     
     def _create_expert(self) -> Optional[PurePursuitExpert]:
         """Initialize expert controller for IL."""

@@ -103,6 +103,15 @@ class RealF110Wrapper:
         self.last_vel = float(obs['linear_vels_x'][0])
         return self._to_vec(obs), obs
 
+    def close(self):
+        """Close the f110_gym environment."""
+        if self.env is not None:
+            try:
+                self.env.close()
+            except Exception:
+                pass
+            self.env = None
+
     def _apply_delay(self, queue, n, new_value):
         """Push new_value, return the delayed value to actually apply."""
         if n == 0:
