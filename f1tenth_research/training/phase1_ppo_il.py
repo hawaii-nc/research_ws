@@ -1,0 +1,808 @@
+"""
+Phase 1 Training: PPO + IL Joint Training
+==========================================
+
+Implements Zhang et al. (2025) Section II-D: combined RL + IL training loop.
+
+Key components:
+- PPO (Proximal Policy Optimization) for reinforcement learning
+- Imitation Learning loss L_IL(π) = ||a_exp - a||^2
+- Joint objective: R(π) = (1-α)·R_RL(π) - α·L_IL(π)
+- Exponentially decaying IL weight: α = exp(-decay * t_epoch)
+
+Architecture:
+- Parallel environment rollouts (num_envs environments)
+- Generalized Advantage Estimation (GAE) for variance reduction
+- Clipped surrogate objective for PPO stability
+- Shared encoder backbone (π, V, μ per Zhang)
+
+Training scale: ~100M timesteps (scale to F1Tenth hardware/sim speed)
+"""
+
+import os
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.tensorboard import SummaryWriter
+from typing import Dict, Tuple, Optional, List
+import warnings
+from collections import defaultdict
+import yaml
+
+from ..envs import F1TenthRMAEnv, PhysicsRandomizer, SampleMode
+from ..models import RMAActorCritic, PolicyNetwork, IntrinsicsEncoder, ValueNetwork
+from ..experts import PurePursuitExpert
+from ..envs.reward import RewardComputer
+
+
+class RunningMeanStd:
+    """Running mean/std tracker for reward normalization (Welford's algorithm)."""
+    def __init__(self, epsilon=1e-4):
+        self.mean = 0.0
+        self.var = 1.0
+        self.count = epsilon
+
+    def update(self, x):
+        x = np.asarray(x, dtype=np.float64)
+        batch_mean = np.mean(x)
+        batch_var = np.var(x)
+        batch_count = len(x)
+        delta = batch_mean - self.mean
+        tot_count = self.count + batch_count
+        self.mean += delta * batch_count / tot_count
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        M2 = m_a + m_b + delta**2 * self.count * batch_count / tot_count
+        self.var = M2 / tot_count
+        self.count = tot_count
+
+    @property
+    def std(self):
+        return float(np.sqrt(self.var))
+
+
+
+class SequentialVecEnv:
+    """
+    Multiple F1TenthRMAEnv instances in a single process.
+    Steps envs sequentially but batches GPU calls.
+    Avoids multiprocessing shared-memory conflicts with f1tenth_gym.
+    Mimics the gymnasium VectorEnv interface used by the trainer.
+    """
+    def __init__(self, envs):
+        self.envs = envs
+        self.num_envs = len(envs)
+        self.observation_space = envs[0].observation_space
+        self.action_space = envs[0].action_space
+        self.single_observation_space = envs[0].observation_space
+        self.single_action_space = envs[0].action_space
+        self._obs = [None] * self.num_envs
+        self._infos = [{}] * self.num_envs
+
+    def reset(self, **kwargs):
+        obs_list, info_list = [], []
+        for env in self.envs:
+            o, i = env.reset(**kwargs)
+            obs_list.append(o)
+            info_list.append(i)
+        import numpy as np
+        return np.stack(obs_list), info_list
+
+    def step(self, actions):
+        import numpy as np
+        obs_list, rew_list, term_list, trunc_list, info_list = [], [], [], [], []
+        for env, action in zip(self.envs, actions):
+            o, r, te, tr, i = env.step(action)
+            obs_list.append(o)
+            rew_list.append(r)
+            term_list.append(te)
+            trunc_list.append(tr)
+            info_list.append(i)
+            # Auto-reset terminated/truncated envs
+            if te or tr:
+                o, i = env.reset()
+                obs_list[-1] = o
+                info_list[-1] = i
+        return (np.stack(obs_list), np.array(rew_list),
+                np.array(term_list), np.array(trunc_list), info_list)
+
+    @property
+    def track(self):
+        return self.envs[0].track
+
+    @property
+    def current_il_weight(self):
+        return self.envs[0].current_il_weight
+
+    @current_il_weight.setter
+    def current_il_weight(self, value):
+        for env in self.envs:
+            env.current_il_weight = value
+
+
+class Phase1Trainer:
+    """
+    PPO + IL joint training for RMA policy.
+    
+    Reference: Zhang et al. (2025) Section II-D, Algorithm 1
+    """
+    
+    def __init__(
+        self,
+        config: Dict,
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        log_dir: str = 'logs/phase1',
+        checkpoint_dir: str = 'checkpoints/phase1',
+    ):
+        """
+        Initialize Phase 1 trainer.
+        
+        Args:
+            config: Configuration dictionary (from YAML)
+            device: 'cuda' or 'cpu'
+            log_dir: Directory for TensorBoard logs
+            checkpoint_dir: Directory for model checkpoints
+        """
+        self.config = config
+        self.device = torch.device(device)
+        self.log_dir = log_dir
+        self.checkpoint_dir = checkpoint_dir
+        
+        os.makedirs(log_dir, exist_ok=True)
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        
+        # Initialize environments and components
+        self.env_config = config.get('environment', {})
+        self.training_config = config.get('phase1_training', {})
+        self.expert_config = config.get('expert', {})
+        
+        # Determine training scale
+        if self.training_config.get('debug_mode', False):
+            self.total_timesteps = self.training_config.get('debug_timesteps', 100_000)
+            print(f"[DEBUG MODE] Using {self.total_timesteps} timesteps")
+        else:
+            self.total_timesteps = self.training_config.get('total_timesteps', 100_000_000)
+        
+        # Create environment(s)
+        self.num_envs = self.training_config.get('num_envs', 16)
+        self.envs = self._create_envs()
+        
+        # Get observation and action dimensions
+        self.obs_dim = (self.envs.single_observation_space.shape[0] if hasattr(self.envs, 'single_observation_space') else self.envs.observation_space.shape[0])
+        self.action_dim = self.envs.single_action_space.shape[0] if hasattr(self.envs, 'single_action_space') else 2
+        self.env_params_dim = 7  # Configurable based on randomization
+        
+        # Initialize networks
+        self.actor_critic = RMAActorCritic(
+            obs_dim=self.obs_dim,
+            action_dim=self.action_dim,
+            intrinsics_dim=8,
+            env_params_dim=self.env_params_dim,
+        ).to(self.device)
+        
+        # Initialize expert controller
+        self.expert = self._create_expert()
+
+        # Adaptive IL rescue state
+        self._reward_history = []       # rolling epoch rewards
+        self._rescue_count = 0          # how many rescues triggered
+        self._rescue_epoch = -999       # last epoch rescue triggered
+        self._rescue_il_weight = 0.0    # current rescue boost (0 = not in rescue)
+        
+        # Optimizers
+        ppo_config = self.training_config.get('ppo', {})
+        self.optimizer = optim.Adam(
+            self.actor_critic.parameters(),
+            lr=ppo_config.get('learning_rate', 3.0e-4),
+        )
+        
+        # Logging
+        self.writer = SummaryWriter(log_dir)
+        self.global_step = 0
+        self.global_episode = 0
+        self.metrics = defaultdict(list)
+        
+        # Reward normalization (running mean/std of discounted returns)
+        self.return_rms = RunningMeanStd()
+        self._discounted_return = 0.0
+    
+    def _create_envs(self):
+        """Create parallel environments using multiprocessing spawn context.
+
+        Uses spawn (not fork) to avoid shared memory conflicts with f110_gym
+        inside Docker. Each worker process runs an independent F1TenthRMAEnv.
+        Falls back to single env if num_envs=1 or if multiprocessing fails.
+        """
+        num_envs = self.num_envs
+        config = self.config
+        max_steps = self.env_config.get('max_episode_steps', 1000)
+        track = self.env_config.get('track', 'example_map')
+        tracks = self.env_config.get('tracks', None)
+
+        if num_envs <= 1:
+            env = F1TenthRMAEnv(
+                config=config,
+                max_episode_steps=max_steps,
+                track=track,
+                tracks=tracks,
+            )
+            return env
+
+        # Sequential multi-env: N envs in ONE process, no multiprocessing
+        # Avoids f1tenth_gym shared memory conflicts from AsyncVectorEnv
+        print(f"[ParallelEnv] Creating {num_envs} sequential environments (single process)")
+        envs = []
+        for i in range(num_envs):
+            e = F1TenthRMAEnv(
+                config=config,
+                max_episode_steps=max_steps,
+                track=track,
+                tracks=tracks,
+            )
+            envs.append(e)
+        vec_env = SequentialVecEnv(envs)
+        print(f"[ParallelEnv] Created {num_envs} environments successfully")
+        return vec_env
+
+
+    def _create_expert(self) -> Optional[PurePursuitExpert]:
+        """Initialize expert controller for IL."""
+        if not self.training_config.get('il', {}).get('use_expert_actions', False):
+            return None
+        
+        track = self.env_config.get('track', 'example_map')
+        tracks = self.env_config.get('tracks', None) or [track]
+
+        # Build per-track raceline data dict
+        track_data = {}
+        for tr in tracks:
+            if tr == 'example_map':
+                wpt_data = np.loadtxt('/f1tenth_gym/examples/example_waypoints.csv',
+                                       delimiter=';', skiprows=3)
+                track_data[tr] = (wpt_data[:, 1:3], None)
+                continue
+            raceline_path = f'/research_ws/maps/racelines/{tr}_raceline.csv'
+            if os.path.exists(raceline_path):
+                rl = np.loadtxt(raceline_path, delimiter=',', skiprows=1)
+                track_data[tr] = (rl[:, 1:3], rl[:, 5])
+                print(f'[Expert] Loaded raceline ({len(rl)} pts) for {tr}')
+            else:
+                wpt_data = np.loadtxt(f'/research_ws/maps/{tr}_centerline.csv', delimiter=',')
+                track_data[tr] = (wpt_data[:, 0:2], None)
+                print(f'[Expert] Loaded centerline ({len(wpt_data)} pts) for {tr}')
+
+        # Use first track as the initial active set
+        waypoints, raceline_speeds = track_data[track if track in track_data else tracks[0]]
+        
+        expert_type = self.expert_config.get('type', 'pure_pursuit')
+        if expert_type == 'pure_pursuit':
+            # Inject max_velocity so expert's throttle mapping matches env
+            pp_config = dict(self.expert_config.get('pure_pursuit', {}))
+            pp_config['max_velocity'] = self.env_config.get('max_velocity', 8.0)
+            expert = PurePursuitExpert(
+                config=pp_config,
+                waypoints=waypoints,
+                raceline_speeds=raceline_speeds,
+            )
+            # Attach multi-track data for runtime switching
+            expert.track_data = track_data
+            expert.active_track = track if track in track_data else tracks[0]
+            return expert
+        else:
+            warnings.warn(f"Unknown expert type: {expert_type}, disabling expert")
+            return None
+    
+    def compute_gae(
+        self,
+        rewards: np.ndarray,
+        values: np.ndarray,
+        next_value: float,
+        dones: np.ndarray,
+        gamma: float = 0.99,
+        gae_lambda: float = 0.95,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Compute Generalized Advantage Estimation (GAE) with episode masking.
+        
+        Args:
+            rewards: Rewards received, shape (rollout_steps,)
+            values: State values, shape (rollout_steps,)
+            next_value: Bootstrap value after the final step
+            dones: 1.0 if a step ended the episode, else 0.0
+            gamma: Discount factor
+            gae_lambda: GAE decay parameter
+            
+        Returns:
+            Tuple of:
+            - advantages: Computed advantages
+            - returns: Cumulative returns (values + advantages)
+        """
+        advantages = np.zeros_like(rewards)
+        gae = 0.0
+        
+        for step in reversed(range(len(rewards))):
+            if step == len(rewards) - 1:
+                next_val = next_value
+            else:
+                next_val = values[step + 1]
+            
+            mask = 1.0 - dones[step]
+            delta = rewards[step] + gamma * next_val * mask - values[step]
+            gae = delta + gamma * gae_lambda * mask * gae
+            advantages[step] = gae
+        
+        returns = advantages + values
+        return advantages, returns
+    
+    def get_expert_action(
+        self,
+        state: Dict,
+        physics_params: Dict,
+    ) -> Optional[np.ndarray]:
+        """
+        Get action from expert controller.
+        
+        Args:
+            state: Current state
+            physics_params: Randomized physics parameters
+            
+        Returns:
+            Expert action or None if expert not available
+        """
+        if self.expert is None:
+            return None
+        
+        return self.expert.compute_action(state, physics_params)
+    
+    def rollout(self, num_steps: int) -> Dict:
+        """
+        Perform environment rollout for PPO.
+        
+        Collects trajectories: (obs, action, reward, value, log_prob, done, expert_action)
+        and computes GAE afterward.
+        
+        Args:
+            num_steps: Number of steps to rollout
+            
+        Returns:
+            Dictionary with rollout data for training update
+        """
+        rollout_data = {
+            'obs': [],
+            'actions': [],
+            'rewards': [],
+            'values': [],
+            'log_probs': [],
+            'dones': [],
+            'advantages': [],
+            'returns': [],
+            'expert_actions': [],
+            'intrinsics': [],
+        }
+        
+        obs, info = self.envs.reset()
+        is_vec = hasattr(self.envs, 'num_envs')
+        n_envs = self.envs.num_envs if is_vec else 1
+
+        def to2d(o):
+            o = np.array(o, dtype=np.float32)
+            return o if o.ndim == 2 else o[np.newaxis]
+
+        def get_ep_tensor(info_, idx=0):
+            """Extract physics params as 1D tensor for env idx."""
+            try:
+                if isinstance(info_, (list, tuple)):
+                    d = info_[idx] if idx < len(info_) else {}
+                elif isinstance(info_, dict):
+                    raw = info_.get('physics_params', {})
+                    d = raw[idx] if isinstance(raw, (list,tuple)) else raw
+                else:
+                    d = {}
+                if not isinstance(d, dict):
+                    d = {}
+                def s(v, default):
+                    if isinstance(v, (list, np.ndarray)):
+                        return float(np.array(v).flat[0])
+                    return float(v) if v is not None else float(default)
+                arr = np.array([
+                    s(d.get('grip_factor'),        1.0),
+                    s(d.get('mass_scale'),          1.0),
+                    s(d.get('inertia_scale'),       1.0),
+                    s(d.get('motor_steering_scale'),1.0),
+                    s(d.get('motor_drive_scale'),   1.0),
+                    s(d.get('delay_steering'),      0.0),
+                    s(d.get('delay_drive'),         0.0),
+                ], dtype=np.float32)
+            except Exception:
+                arr = np.array([1.,1.,1.,1.,1.,0.,0.], dtype=np.float32)
+            return torch.from_numpy(arr).float().to(self.device)
+
+        with torch.no_grad():
+            for step in range(num_steps):
+                obs2d = to2d(obs)  # (n_envs, obs_dim)
+
+                actions_list, log_probs_list, values_list, intrinsics_list = [], [], [], []
+                for i in range(n_envs):
+                    ep_t = get_ep_tensor(info, i)
+                    intr = self.actor_critic.get_intrinsics(ep_t)
+                    obs_t = torch.from_numpy(obs2d[i]).float().to(self.device)
+                    a, lp, _, v, _ = self.actor_critic.get_action_and_value(obs_t, intr)
+                    actions_list.append(a)
+                    log_probs_list.append(lp)
+                    values_list.append(v)
+                    intrinsics_list.append(intr)
+
+                actions_batch    = torch.stack(actions_list)
+                log_probs_batch  = torch.stack(log_probs_list)
+                values_batch     = torch.stack(values_list)
+                intrinsics_batch = torch.stack(intrinsics_list)
+
+                env_action = torch.clamp(actions_batch, -1.0, 1.0).cpu().numpy()
+                if not is_vec:
+                    env_action = env_action[0]
+
+                # Expert action from first env
+                expert_action = None
+                if self.expert is not None:
+                    try:
+                        d0 = (info[0] if isinstance(info,(list,tuple))
+                              else info).get('physics_params', {}) if isinstance(
+                              info[0] if isinstance(info,(list,tuple)) else info, dict) else {}
+                        o0 = obs2d[0]
+                        i0 = info[0] if isinstance(info, (list, tuple)) else info
+                        if not isinstance(i0, dict):
+                            i0 = {}
+                        o0 = obs2d[0]
+                        # Multi-track: switch expert waypoints to match current env track
+                        if hasattr(self.expert, 'track_data') and self.expert.track_data:
+                            current_track = getattr(self.envs, 'track', None)
+                            if current_track:
+                                self.expert.switch_track(current_track)
+                        state_dict = {
+                            'position': (float(i0.get('poses_x', 0.0)), float(i0.get('poses_y', 0.0))),
+                            'yaw': float(i0.get('poses_theta', 0.0)),
+                            'velocity': float(o0[0]),
+                            'yaw_rate': float(o0[4]),
+                        }
+                        expert_action = self.get_expert_action(state_dict, d0)
+                    except Exception:
+                        expert_action = None
+
+                obs, reward, terminated, truncated, info = self.envs.step(env_action)
+
+                if is_vec:
+                    rewards = np.array(reward, dtype=np.float32)
+                    dones   = np.array(np.logical_or(terminated, truncated), dtype=np.float32)
+                else:
+                    rewards = np.array([float(reward)], dtype=np.float32)
+                    dones   = np.array([float(bool(terminated or truncated))], dtype=np.float32)
+                    if dones[0]:
+                        obs, info = self.envs.reset()
+
+                for i in range(n_envs):
+                    rollout_data['obs'].append(obs2d[i])
+                    rollout_data['actions'].append(actions_batch[i].cpu().numpy())
+                    rollout_data['rewards'].append(float(rewards[i]))
+                    rollout_data['values'].append(values_batch[i].cpu().numpy())
+                    rollout_data['log_probs'].append(log_probs_batch[i].cpu().numpy())
+                    rollout_data['dones'].append(float(dones[i]))
+                    rollout_data['intrinsics'].append(intrinsics_batch[i].cpu().numpy())
+                    if expert_action is not None:
+                        rollout_data['expert_actions'].append(expert_action)
+
+                self.global_step += n_envs
+
+            # Bootstrap value
+            obs2d_f = to2d(obs)
+            ep_f = get_ep_tensor(info, 0)
+            intr_f = self.actor_critic.get_intrinsics(ep_f)
+            obs_f  = torch.from_numpy(obs2d_f[0]).float().to(self.device)
+            next_value = self.actor_critic.value(obs_f, intr_f).cpu().numpy().item()
+
+        ppo_config = self.training_config.get('ppo', {})
+        rewards_arr = np.array(rollout_data['rewards'], dtype=np.float32)
+        values_arr = np.array(rollout_data['values'], dtype=np.float32).flatten()
+        dones_arr = np.array(rollout_data['dones'], dtype=np.float32)
+
+        # Reward normalization (running discounted returns)
+        gamma_n = ppo_config.get('gamma', 0.99)
+        discounted = np.zeros_like(rewards_arr)
+        running = self._discounted_return
+        for i, (r, d) in enumerate(zip(rewards_arr, dones_arr)):
+            running = r + gamma_n * running * (1.0 - d)
+            discounted[i] = running
+        self._discounted_return = float(running)
+        self.return_rms.update(discounted)
+        rewards_arr = rewards_arr / (self.return_rms.std + 1e-8)
+        advantages, returns = self.compute_gae(
+            rewards_arr,
+            values_arr,
+            next_value,
+            dones_arr,
+            gamma=ppo_config.get('gamma', 0.99),
+            gae_lambda=ppo_config.get('gae_lambda', 0.95),
+        )
+        rollout_data['advantages'] = advantages
+        rollout_data['returns'] = returns
+
+        return rollout_data
+    
+    def update(self, rollout_data: Dict, epoch: int):
+        """
+        Update policy and value function using collected rollout.
+        
+        Implements:
+        - PPO clipped surrogate objective for a Gaussian policy
+        - IL loss for imitation: L_IL(π) = ||a_exp - mean||^2
+        - α = exp(-decay * epoch)
+        
+        Args:
+            rollout_data: Data from rollout()
+            epoch: Current training epoch
+        """
+        # Compute IL weight: exponential decay + adaptive rescue
+        il_config = self.training_config.get('il', {})
+        il_decay = il_config.get('il_weight_decay', 0.001)
+        il_weight_start = il_config.get('il_weight_start', 1.0)
+        il_weight_end = il_config.get('il_weight_end', 0.01)
+
+        # Standard exponential decay (Zhang et al.)
+        base_il_weight = il_weight_start * np.exp(-il_decay * epoch)
+        base_il_weight = max(base_il_weight, il_weight_end)
+
+        # Rescue parameters
+        rescue_config = il_config.get('rescue', {})
+        plateau_window = rescue_config.get('plateau_window', 50)
+        plateau_threshold = rescue_config.get('plateau_threshold', 0.01)
+        rescue_weight = rescue_config.get('rescue_il_weight', 0.3)
+        rescue_decay = rescue_config.get('rescue_decay', 0.05)
+        max_rescues = rescue_config.get('max_rescues', 3)
+
+        # Check for plateau and trigger rescue if needed
+        if (len(self._reward_history) >= plateau_window * 2
+                and self._rescue_count < max_rescues
+                and epoch - self._rescue_epoch > 100):  # min 100 epochs between rescues
+            recent = np.mean(self._reward_history[-plateau_window:])
+            prior = np.mean(self._reward_history[-plateau_window*2:-plateau_window])
+            improvement = recent - prior
+            if improvement < plateau_threshold:
+                self._rescue_count += 1
+                self._rescue_epoch = epoch
+                self._rescue_il_weight = rescue_weight
+                print(f"[IL RESCUE #{self._rescue_count}] Plateau detected "
+                      f"(improvement={improvement:.4f} < {plateau_threshold}). "
+                      f"Boosting IL weight to {rescue_weight:.3f}")
+
+        # Decay rescue weight if active
+        if self._rescue_il_weight > il_weight_end:
+            epochs_since_rescue = epoch - self._rescue_epoch
+            self._rescue_il_weight = rescue_weight * np.exp(
+                -rescue_decay * epochs_since_rescue
+            )
+            self._rescue_il_weight = max(self._rescue_il_weight, 0.0)
+
+        # Final IL weight: max of base decay and active rescue
+        il_weight = max(base_il_weight, self._rescue_il_weight)
+        # Share current il_weight with env for privileged lookahead dropout
+        if hasattr(self.envs, 'current_il_weight'):
+            self.envs.current_il_weight = float(il_weight)
+        
+        batch_size = self.training_config.get('batch_size', 256)
+        num_epochs = self.training_config.get('num_epochs', 10)
+        ppo_config = self.training_config.get('ppo', {})
+        clip_eps = ppo_config.get('clip_eps', ppo_config.get('clip_ratio', 0.2))
+        value_coeff = ppo_config.get('value_coeff', 0.5)
+        entropy_coeff = ppo_config.get('entropy_coeff', 0.01)
+        max_grad_norm = ppo_config.get('max_grad_norm', 0.5)
+        
+        # Convert rollout data to tensors
+        obs_tensor = torch.from_numpy(np.array(rollout_data['obs'])).float().to(self.device)
+        actions_tensor = torch.from_numpy(np.array(rollout_data['actions'])).float().to(self.device)
+        returns_tensor = torch.from_numpy(rollout_data['returns']).float().to(self.device)
+        advantages_tensor = torch.from_numpy(rollout_data['advantages']).float().to(self.device)
+        intrinsics_tensor = torch.from_numpy(np.array(rollout_data['intrinsics'])).float().to(self.device)
+        old_log_probs_tensor = torch.from_numpy(np.array(rollout_data['log_probs'])).float().to(self.device)
+
+        expert_actions_tensor = None
+        if il_config.get('enabled', False) and len(rollout_data['expert_actions']) == len(rollout_data['obs']):
+            expert_actions_tensor = torch.from_numpy(np.array(rollout_data['expert_actions'])).float().to(self.device)
+        
+        # Normalize advantages
+        advantages_tensor = (advantages_tensor - advantages_tensor.mean()) / (advantages_tensor.std() + 1e-8)
+        
+        # Training epochs
+        for epoch_i in range(num_epochs):
+            # Mini-batch updates
+            indices = np.random.permutation(len(obs_tensor))
+            
+            for start_idx in range(0, len(obs_tensor), batch_size):
+                batch_indices = indices[start_idx:start_idx + batch_size]
+                
+                obs_batch = obs_tensor[batch_indices]
+                actions_batch = actions_tensor[batch_indices]
+                returns_batch = returns_tensor[batch_indices]
+                advantages_batch = advantages_tensor[batch_indices]
+                intrinsics_batch = intrinsics_tensor[batch_indices]
+                old_log_probs_batch = old_log_probs_tensor[batch_indices]
+                
+                mean_batch, log_std_batch = self.actor_critic.policy(obs_batch, intrinsics_batch)
+                std_batch = torch.exp(log_std_batch)
+                dist = torch.distributions.Normal(mean_batch, std_batch)
+                new_log_probs = dist.log_prob(actions_batch).sum(dim=-1)
+                entropy = dist.entropy().sum(dim=-1).mean()
+                values = self.actor_critic.value(obs_batch, intrinsics_batch)
+
+                ratio = torch.exp(new_log_probs - old_log_probs_batch)
+                surr1 = ratio * advantages_batch
+                surr2 = torch.clamp(ratio, 1.0 - clip_eps, 1.0 + clip_eps) * advantages_batch
+                policy_loss = -torch.min(surr1, surr2).mean()
+                value_loss = ((values - returns_batch) ** 2).mean()
+                
+                il_loss = torch.tensor(0.0, device=self.device)
+                if expert_actions_tensor is not None:
+                    expert_actions_batch = expert_actions_tensor[batch_indices]
+                    il_loss = ((mean_batch - expert_actions_batch) ** 2).mean()
+                
+                # Combined loss
+                total_loss = policy_loss + value_coeff * value_loss - entropy_coeff * entropy
+                
+                if il_config.get('enabled', False):
+                    total_loss += il_weight * il_loss
+                
+                # Backward pass
+                self.optimizer.zero_grad()
+                total_loss.backward()
+                
+                grad_norm = nn.utils.clip_grad_norm_(
+                    self.actor_critic.parameters(),
+                    max_grad_norm
+                )
+                
+                self.optimizer.step()
+
+                with torch.no_grad():
+                    clip_fraction = ((ratio - 1.0).abs() > clip_eps).float().mean()
+                    approx_kl = (old_log_probs_batch - new_log_probs).mean()
+                
+                # Log metrics
+                self.metrics['policy_loss'].append(policy_loss.item())
+                self.metrics['value_loss'].append(value_loss.item())
+                self.metrics['entropy'].append(entropy.item())
+                self.metrics['clip_fraction'].append(clip_fraction.item())
+                self.metrics['approx_kl'].append(approx_kl.item())
+                if il_config.get('enabled', False):
+                    self.metrics['il_loss'].append(il_loss.item())
+                self.metrics['grad_norm'].append(grad_norm.item())
+    
+    def train(self):
+        """
+        Main training loop (Phase 1).
+        
+        Iteratively:
+        1. Rollout trajectories with current policy
+        2. Update policy and value function via PPO + IL
+        3. Log metrics and save checkpoints
+        """
+        rollout_steps = self.training_config.get('rollout_steps', 2048)
+        checkpoint_interval = self.training_config.get('checkpoint_interval', 10)
+        log_interval = self.training_config.get('log_interval', 100)
+        eval_interval = self.training_config.get('eval_interval', 1000)
+        
+        epoch = 0
+        while self.global_step < self.total_timesteps:
+            # Rollout
+            print(f"[Epoch {epoch}] Rollout ({rollout_steps} steps)...")
+            rollout_data = self.rollout(rollout_steps)
+            
+            # Update
+            print(f"[Epoch {epoch}] Update...")
+            self.update(rollout_data, epoch)
+            
+            # Always track reward for IL rescue (regardless of log interval)
+            _curr_reward = np.mean(rollout_data['rewards']) if len(rollout_data['rewards']) > 0 else 0
+            self._reward_history.append(_curr_reward)
+
+            # Logging
+            if epoch % log_interval == 0:
+                avg_reward = np.mean(rollout_data['rewards']) if len(rollout_data['rewards']) > 0 else 0
+                self._reward_history.append(avg_reward)  # track for adaptive IL rescue
+                print(f"[Epoch {epoch}] Step {self.global_step}: Avg Reward = {avg_reward:.3f}")
+                
+                self.writer.add_scalar('train/avg_reward', avg_reward, self.global_step)
+                for key, values in self.metrics.items():
+                    if len(values) > 0:
+                        self.writer.add_scalar(f'train/{key}', np.mean(values), self.global_step)
+                self.metrics.clear()
+            
+            # Checkpointing
+            if epoch % checkpoint_interval == 0:
+                self.save_checkpoint(f'checkpoint_epoch_{epoch}.pt')
+                print(f"[Epoch {epoch}] Checkpoint saved")
+
+            # Periodic track difficulty reweighting (Prioritized Level Replay style)
+            reweight_interval = self.training_config.get('track_reweight_interval', 0)
+            if reweight_interval > 0 and epoch > 0 and epoch % reweight_interval == 0:
+                tracks_list = getattr(self.envs, 'tracks_list', None) or self.env_config.get('tracks', None)
+                if tracks_list:
+                    from .track_difficulty_eval import evaluate_track_difficulty
+                    print(f"[Epoch {epoch}] Running track difficulty eval for reweighting...")
+                    difficulty = evaluate_track_difficulty(
+                        self.actor_critic, self.config, tracks_list, self.device,
+                        episodes_per_track=self.training_config.get('reweight_eval_episodes', 3),
+                    )
+                    print(f"[Epoch {epoch}] Track difficulty scores: "
+                          + ", ".join(f"{t}={d:.2f}" for t, d in difficulty.items()))
+                    self.envs.set_track_weights(difficulty, floor=self.training_config.get('track_weight_floor', 0.05))
+                    weights_now = getattr(self.envs, 'track_weights', {})
+                    self.writer.add_text('train/track_weights', str(weights_now), self.global_step)
+
+            epoch += 1
+        
+        print("[Training Complete] Phase 1 training finished")
+        self.save_checkpoint('final.pt')
+    
+    def save_checkpoint(self, filename: str):
+        """Save model checkpoint."""
+        path = os.path.join(self.checkpoint_dir, filename)
+        torch.save({
+            'actor_critic': self.actor_critic.state_dict(),
+            'optimizer': self.optimizer.state_dict(),
+            'global_step': self.global_step,
+            'config': self.config,
+        }, path)
+        print(f"Checkpoint saved to {path}")
+    
+    def load_checkpoint(self, filename: str):
+        """Load model checkpoint."""
+        path = os.path.join(self.checkpoint_dir, filename)
+        checkpoint = torch.load(path, map_location=self.device)
+        self.actor_critic.load_state_dict(checkpoint['actor_critic'])
+        self.optimizer.load_state_dict(checkpoint['optimizer'])
+        self.global_step = checkpoint['global_step']
+        print(f"Checkpoint loaded from {path}")
+
+
+def main():
+    """Entry point for Phase 1 training."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Phase 1 Training: PPO + IL')
+    parser.add_argument('--config', type=str, default='configs/rma_config.yaml',
+                       help='Path to config YAML')
+    parser.add_argument('--device', type=str, default='auto',
+                       help='Device: cuda, cpu, or auto')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+    parser.add_argument('--log_dir', type=str, default='logs/phase1',
+                       help='Directory for TensorBoard logs')
+    parser.add_argument('--resume', type=str, default=None,
+                       help='Path to checkpoint .pt file to resume training from')
+    parser.add_argument('--checkpoint_dir', type=str, default='checkpoints/phase1',
+                       help='Directory for model checkpoints')
+    args = parser.parse_args()
+    
+    # Load config
+    with open(args.config, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    if args.debug:
+        config['phase1_training']['debug_mode'] = True
+    
+    # Determine device
+    if args.device == 'auto':
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    else:
+        device = args.device
+    
+    print(f"Training on device: {device}")
+    
+    # Create trainer and train
+    trainer = Phase1Trainer(config, device=device, log_dir=args.log_dir, checkpoint_dir=args.checkpoint_dir)
+    if args.resume:
+        print(f"[Resume] Loading checkpoint from {args.resume}")
+        trainer.load_checkpoint(args.resume)
+    trainer.train()
+
+
+if __name__ == '__main__':
+    main()

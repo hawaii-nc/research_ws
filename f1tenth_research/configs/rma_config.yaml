@@ -1,0 +1,98 @@
+environment:
+  max_velocity: 3.0  # m/s, action [-1,1] -> [0, max_velocity]
+  observation:
+    include_lidar: true
+    lidar_beams: 108
+    lidar_max_range: 10.0
+    lidar_noise_std: 0.02      # Gaussian noise stddev (normalized [0,1] range)
+    lidar_dropout_prob: 0.05   # Probability of a beam being dropped (returns max range)
+    normalize_obs: true
+  log_interval: 10
+  max_episode_steps: 34000
+  randomization:
+    apply_post_scale_noise: true
+    disturbance_end: 0.9
+    disturbance_friction_scale: 0.7
+    disturbance_magnitude: 0.3
+    disturbance_start: 0.3
+    disturbance_timing:
+    - 0.3
+    - 0.9
+    enabled: true
+    mid_episode_disturbance: true
+    noise_fraction: 0.2
+  reward:
+    lookahead_distance: 1.5
+    max_action_diff: 0.4
+    max_lateral_accel: 10.0
+    max_track_error: 0.5
+    max_velocity_error: 3.0
+    max_yaw_rate_error: 4.0
+    min_speed: -0.1
+    use_wall_proximity: false
+    vdes_base_speed: 4.0
+    vdes_lookahead_steps: 8
+    vdes_min_speed: 1.0
+    weight_alive: 0.15
+    weight_collision: 1.0
+    weight_smoothness: 0.005
+    weight_velocity_tracking: 0.5
+    weight_wall_proximity: 0.2
+    weight_progress: 5.0
+    weight_centerline_error: 1.0
+    centerline_error_threshold: 0.1
+    weight_speed_turn: 0.0
+    speed_turn_steer_threshold: 0.25
+    weight_yaw_rate_tracking: 0.0
+    wheelbase: 0.33
+  track: aut
+  tracks: [aut_tight, esp_tight, gbr_tight, mco_tight, spielberg_tight, silverstone_tight, monza_tight, sochi_tight, ims_tight, zandvoort_tight, sepang_tight, yasmarina_tight, budapest_tight, melbourne_tight]
+expert:
+  pure_pursuit:
+    lookahead_distance_base: 0.5
+    max_speed: 8.0
+    min_speed: 0.5
+  type: pure_pursuit
+phase1_training:
+  batch_size: 256
+  il:
+    enabled: true
+    il_weight_decay: 0.0035
+    il_weight_end: 0.01
+    il_weight_start: 1.0
+    rescue:
+      max_rescues: 8
+      plateau_threshold: 0.05
+      plateau_window: 100
+      rescue_decay: 0.1
+      rescue_il_weight: 0.3
+    use_expert_actions: true
+  log_interval: 100
+  num_envs: 1
+  num_epochs: 10
+  ppo:
+    clip_eps: 0.2
+    entropy_coeff: 0.001
+    gae_lambda: 0.95
+    gamma: 0.99
+    learning_rate: 0.0003
+    max_grad_norm: 0.5
+    value_coeff: 0.5
+  rollout_steps: 34000
+  track_reweight_interval: 50     # re-run difficulty eval every N epochs (0 = disabled)
+  reweight_eval_episodes: 3       # episodes per track for the fast difficulty check
+  track_weight_floor: 0.05        # minimum sampling probability per track (anti-forgetting)
+  total_timesteps: 40000000
+
+phase2_training:
+  learning_rate: 1.0e-3
+  buffer_size: 1000000
+  num_eval_episodes: 200
+  num_epochs: 100
+  batch_size: 256
+
+networks:
+  adaptation:
+    state_action_dim: 115   # obs_dim (113) + action_dim (2) -- no raceline lookahead exists
+    history_window: 100
+    intrinsics_dim: 8

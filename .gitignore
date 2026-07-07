@@ -1,0 +1,18 @@
+# Large/generated artifacts -- never commit these
+*.pt
+*.pth
+*.tar.gz
+*.npz
+checkpoints/
+logs/
+data/*.pkl
+probe_results/
+venv_plot/
+*.log
+e1_e2*.json
+e1_results.json
+corner_test_results_*.json
+__pycache__/
+*.pyc
+build/
+install/
